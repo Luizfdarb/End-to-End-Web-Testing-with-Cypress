@@ -2,7 +2,7 @@
 
 context('TODO MVC Application V2 Tests', () => {
   beforeEach(() => {
-    cy.visit(`${Cypress.env('TransferProtocol')}://todomvc.com/examples/react/#/`)
+    cy.visit('https://demo.playwright.dev/todomvc/')
   });
 
   describe('Todo app tests', () => {

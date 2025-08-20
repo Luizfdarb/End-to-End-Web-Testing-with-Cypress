@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Guia Completo - End-to-End Web Testing with Cypress</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+            border-bottom: 3px solid #3498db;
+            padding-bottom: 10px;
+            margin-bottom: 30px;
+        }
+        h2 {
+            color: #34495e;
+            border-left: 4px solid #3498db;
+            padding-left: 15px;
+            margin-top: 30px;
+        }
+        h3 {
+            color: #2980b9;
+            margin-top: 25px;
+        }
+        .chapter {
+            background-color: #f8f9fa;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            border-left: 5px solid #3498db;
+        }
+        .command {
+            background-color: #2c3e50;
+            color: #ecf0f1;
+            padding: 10px 15px;
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+            margin: 10px 0;
+            overflow-x: auto;
+        }
+        .command-open {
+            background-color: #27ae60;
+            color: white;
+            padding: 10px 15px;
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+            margin: 10px 0;
+            overflow-x: auto;
+        }
+        .command-run {
+            background-color: #e74c3c;
+            color: white;
+            padding: 10px 15px;
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+            margin: 10px 0;
+            overflow-x: auto;
+        }
+        .info {
+            background-color: #e8f4fd;
+            border: 1px solid #3498db;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 15px 0;
+        }
+        .warning {
+            background-color: #fff3cd;
+            border: 1px solid #ffc107;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 15px 0;
+        }
+        .success {
+            background-color: #d4edda;
+            border: 1px solid #28a745;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 15px 0;
+        }
+        .test-files {
+            background-color: #f1f2f6;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        .prerequisites {
+            background-color: #e8f5e8;
+            border: 1px solid #28a745;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+        .toc {
+            background-color: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+        .toc ul {
+            list-style-type: none;
+            padding-left: 0;
+        }
+        .toc li {
+            margin: 8px 0;
+        }
+        .toc a {
+            color: #3498db;
+            text-decoration: none;
+            font-weight: 500;
+        }
+        .toc a:hover {
+            text-decoration: underline;
+        }
+        @media print {
+            body {
+                background-color: white;
+            }
+            .container {
+                box-shadow: none;
+                padding: 0;
+            }
+            .command, .command-open, .command-run {
+                break-inside: avoid;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 Guia Completo - End-to-End Web Testing with Cypress</h1>
+        
+        <div class="prerequisites">
+            <h3>📋 Pré-requisitos</h3>
+            <ul>
+                <li><strong>Node.js:</strong> v16.14.0 ou superior</li>
+                <li><strong>npm:</strong> 8.3.1 ou superior</li>
+                <li><strong>Cypress:</strong> 6.2.1 (já instalado)</li>
+                <li><strong>Sistema Operacional:</strong> Windows 10/11</li>
+            </ul>
+        </div>
+
+        <div class="toc">
+            <h3>📑 Índice</h3>
+            <ul>
+                <li><a href="#setup">🔧 Configuração Inicial</a></li>
+                <li><a href="#chapter3">📖 Capítulo 3 - Configuração Básica</a></li>
+                <li><a href="#chapter4">📖 Capítulo 4 - Assertions</a></li>
+                <li><a href="#chapter5">📖 Capítulo 5 - Debugging</a></li>
+                <li><a href="#chapter6">📖 Capítulo 6 - TDD (Test-Driven Development)</a></li>
+                <li><a href="#chapter7">📖 Capítulo 7 - Actionability</a></li>
+                <li><a href="#chapter8">📖 Capítulo 8 - Aliases e Variáveis</a></li>
+                <li><a href="#chapter9">📖 Capítulo 9 - Intercepts e Stubs</a></li>
+                <li><a href="#chapter10">📖 Capítulo 10 - Navegação e Requisições</a></li>
+                <li><a href="#chapter11">📖 Capítulo 11 - Spies e XHR</a></li>
+                <li><a href="#chapter12">📖 Capítulo 12 - Visual Testing</a></li>
+                <li><a href="#realworld">🌍 Cypress Real World App</a></li>
+                <li><a href="#tips">💡 Dicas e Truques</a></li>
+            </ul>
+        </div>
+
+        <div id="setup" class="chapter">
+            <h2>🔧 Configuração Inicial</h2>
+            <div class="info">
+                <strong>Verificar versões instaladas:</strong>
+            </div>
+            <div class="command">
+                node --version<br>
+                npm --version<br>
+                cypress --version
+            </div>
+        </div>
+
+        <div id="chapter3" class="chapter">
+            <h2>📖 Capítulo 3 - Configuração Básica</h2>
+            <div class="test-files">
+                <strong>Arquivos de teste:</strong> examples/todo-app.spec.js, integration-v2/todo-app.spec.js
+            </div>
+            
+            <h3>Comandos Básicos:</h3>
+            <div class="command-open">
+                cd chapter-03<br>
+                npm install<br>
+                npm run cypress:open
+            </div>
+            
+            <div class="command-run">
+                cd chapter-03<br>
+                npm install<br>
+                npm run cypress:run
+            </div>
+
+            <h3>Comandos Avançados (Disponíveis):</h3>
+            <div class="command">
+                npm run cypress:chrome        # Executa no Chrome<br>
+                npm run cypress:firefox       # Executa no Firefox<br>
+                npm run cypress:tablet-view   # Viewport de tablet<br>
+                npm run cypress:electron:headed # Modo headed<br>
+                npm run cypress:firefox:headless # Firefox headless<br>
+                npm run cypress:chrome:headless  # Chrome headless
+            </div>
+
+            <div class="success">
+                ✅ <strong>Recomendado para:</strong> Modo interativo (cypress:open) para aprender e debug
+            </div>
+        </div>
+
+        <div id="chapter4" class="chapter">
+            <h2>📖 Capítulo 4 - Assertions</h2>
+            <div class="test-files">
+                <strong>Arquivos de teste:</strong> assertions.spec.js, practical-tests.spec.js, sample.spec.js
+            </div>
+            
+            <div class="command-open">
+                cd chapter-04<br>
+                npm install<br>
+                npm run cypress:open
+            </div>
+            
+            <div class="command-run">
+                cd chapter-04<br>
+                npm install<br>
+                npm run cypress:run
+            </div>
+
+            <div class="success">
+                ✅ <strong>Recomendado para:</strong> Modo interativo (cypress:open) para ver assertions em ação
+            </div>
+        </div>
+
+        <div id="chapter5" class="chapter">
+            <h2>📖 Capítulo 5 - Debugging</h2>
+            <div class="test-files">
+                <strong>Arquivos de teste:</strong> examples/debugging.spec.js
+            </div>
+            
+            <div class="command-open">
+                cd chapter-05<br>
+                npm install<br>
+                npm run cypress:open
+            </div>
+            
+            <div class="command-run">
+                cd chapter-05<br>
+                npm install<br>
+                npm run cypress:run
+            </div>
+
+            <div class="warning">
+                ⚠️ <strong>Importante:</strong> Este capítulo é focado em debugging - use cypress:open para melhor experiência
+            </div>
+        </div>
+
+        <div id="chapter6" class="chapter">
+            <h2>📖 Capítulo 6 - TDD (Test-Driven Development)</h2>
+            <div class="test-files">
+                <strong>Arquivos de teste:</strong> tdd-todo-app/cypress/integration/todo-v1.spec.js, todo-v2.spec.js
+            </div>
+            
+            <h3>Passo 1: Iniciar a aplicação React</h3>
+            <div class="command">
+                cd chapter-06/tdd-todo-app<br>
+                npm install<br>
+                npm start
+            </div>
+            
+            <h3>Passo 2: Em outro terminal, executar os testes</h3>
+            <div class="command-open">
+                cd chapter-06/tdd-todo-app<br>
+                npm run cypress:open
+            </div>
+            
+            <div class="command-run">
+                cd chapter-06/tdd-todo-app<br>
+                npm run cypress:run
+            </div>
+
+            <div class="info">
+                <strong>Nota:</strong> A aplicação React deve estar rodando em http://localhost:3000
+            </div>
+        </div>
+
+        <div id="chapter7" class="chapter">
+            <h2>📖 Capítulo 7 - Actionability</h2>
+            <div class="test-files">
+                <strong>Arquivos de teste:</strong> actionability.spec.js
+            </div>
+            
+            <div class="command-open">
+                cd chapter-07<br>
+                npm install<br>
+                npm run cypress:open
+            </div>
+            
+            <div class="command-run">
+                cd chapter-07<br>
+                npm install<br>
+                npm run cypress:run
+            </div>
+        </div>
+
+        <div id="chapter8" class="chapter">
+            <h2>📖 Capítulo 8 - Aliases e Variáveis</h2>
+            <div class="test-files">
+                <strong>Arquivos de teste:</strong> aliases.spec.js, closures.spec.js, variables-scope.spec.js
+            </div>
+            
+            <div class="command-open">
+                cd chapter-08<br>
+                npm install<br>
+                npm run cypress:open
+            </div>
+            
+            <div class="command-run">
+                cd chapter-08<br>
+                npm install<br>
+                npm run cypress:run
+            </div>
+        </div>
+
+        <div id="chapter9" class="chapter">
+            <h2>📖 Capítulo 9 - Intercepts e Stubs</h2>
+            <div class="test-files">
+                <strong>Arquivos de teste:</strong> intercepts.spec.js, selector-payground.spec.js, spies.spec.js, stub.spec.js
+            </div>
+            
+            <div class="command-open">
+                cd chapter-09<br>
+                npm install<br>
+                npm run cypress:open
+            </div>
+            
+            <div class="command-run">
+                cd chapter-09<br>
+                npm install<br>
+                npm run cypress:run
+            </div>
+        </div>
+
+        <div id="chapter10" class="chapter">
+            <h2>📖 Capítulo 10 - Navegação e Requisições</h2>
+            <div class="test-files">
+                <strong>Arquivos de teste:</strong> navigation/navigation.spec.js, network-requests/network-requests.spec.js
+            </div>
+            
+            <h3>Opção 1: Usar Real World App (Recomendado)</h3>
+            <div class="command">
+                cd chapter-10<br>
+                npm install<br>
+                npm run cypress-app-windows  # Para Windows
+            </div>
+            
+            <h3>Opção 2: Executar testes diretamente</h3>
+            <div class="command-open">
+                cd chapter-10<br>
+                npm install<br>
+                npm run cypress:open
+            </div>
+            
+            <div class="command-run">
+                cd chapter-10<br>
+                npm install<br>
+                npm run cypress:run
+            </div>
+
+            <div class="info">
+                <strong>Nota:</strong> Este capítulo usa o Real World App como base
+            </div>
+        </div>
+
+        <div id="chapter11" class="chapter">
+            <h2>📖 Capítulo 11 - Spies e XHR</h2>
+            <div class="test-files">
+                <strong>Arquivos de teste:</strong> spies/spies.spec.js, xhr-requests/xhr.spec.js, xhr-requests/xhr-stubbing.spec.js
+            </div>
+            
+            <h3>Opção 1: Usar Real World App (Recomendado)</h3>
+            <div class="command">
+                cd chapter-11<br>
+                npm install<br>
+                npm run cypress-app-windows  # Para Windows
+            </div>
+            
+            <h3>Opção 2: Executar testes diretamente</h3>
+            <div class="command-open">
+                cd chapter-11<br>
+                npm install<br>
+                npm run cypress:open
+            </div>
+            
+            <div class="command-run">
+                cd chapter-11<br>
+                npm install<br>
+                npm run cypress:run
+            </div>
+        </div>
+
+        <div id="chapter12" class="chapter">
+            <h2>📖 Capítulo 12 - Visual Testing</h2>
+            <div class="test-files">
+                <strong>Arquivos de teste:</strong> applitools/applitools.spec.js, percy/percy.spec.js
+            </div>
+            
+            <h3>Opção 1: Usar Real World App (Recomendado)</h3>
+            <div class="command">
+                cd chapter-12<br>
+                npm install<br>
+                npm run cypress-app-windows  # Para Windows
+            </div>
+            
+            <h3>Opção 2: Executar testes diretamente</h3>
+            <div class="command-open">
+                cd chapter-12<br>
+                npm install<br>
+                npm run cypress:open
+            </div>
+            
+            <div class="command-run">
+                cd chapter-12<br>
+                npm install<br>
+                npm run cypress:run
+            </div>
+
+            <div class="warning">
+                ⚠️ <strong>Nota:</strong> Este capítulo requer configuração de serviços externos (Applitools, Percy)
+            </div>
+        </div>
+
+        <div id="realworld" class="chapter">
+            <h2>🌍 Cypress Real World App</h2>
+            <div class="info">
+                <strong>Descrição:</strong> Aplicação completa para prática real com todas as funcionalidades
+            </div>
+            
+            <h3>Passo 1: Instalar dependências</h3>
+            <div class="command">
+                cd cypress-realworld-app<br>
+                npm install
+            </div>
+            
+            <h3>Passo 2: Iniciar a aplicação</h3>
+            <div class="command">
+                npm run start
+            </div>
+            
+            <h3>Passo 3: Executar testes</h3>
+            <div class="command-open">
+                npm run cypress:open
+            </div>
+            
+            <div class="command-run">
+                npm run cypress:run
+            </div>
+
+            <h3>Comandos Específicos:</h3>
+            <div class="command">
+                npm run test:api          # Testes de API<br>
+                npm run test:unit         # Testes unitários<br>
+                npm run cypress:open:mobile # Modo mobile
+            </div>
+
+            <div class="success">
+                ✅ <strong>Recomendado para:</strong> Prática completa e aprendizado avançado
+            </div>
+        </div>
+
+        <div id="tips" class="chapter">
+            <h2>💡 Dicas e Truques</h2>
+            
+            <h3>🔄 Comandos para Todos os Capítulos</h3>
+            <div class="command">
+                # Script para executar todos os capítulos<br>
+                for /d %i in (chapter-*) do (<br>
+                &nbsp;&nbsp;cd %i<br>
+                &nbsp;&nbsp;npm install<br>
+                &nbsp;&nbsp;npm run cypress:run<br>
+                &nbsp;&nbsp;cd ..<br>
+                )
+            </div>
+
+            <h3>📊 Comandos Úteis</h3>
+            <div class="command">
+                cypress open --browser chrome    # Abrir no Chrome<br>
+                cypress open --browser firefox   # Abrir no Firefox<br>
+                cypress run --browser chrome     # Executar no Chrome<br>
+                cypress run --headed             # Modo headed<br>
+                cypress run --spec "path/to/spec" # Executar teste específico
+            </div>
+
+            <h3>🔧 Troubleshooting</h3>
+            <div class="warning">
+                <strong>Problema:</strong> Testes falhando por URL inválida<br>
+                <strong>Solução:</strong> Atualizar URLs nos arquivos .spec.js para https://demo.playwright.dev/todomvc/
+            </div>
+
+            <div class="warning">
+                <strong>Problema:</strong> Dependências desatualizadas<br>
+                <strong>Solução:</strong> Executar npm install em cada capítulo
+            </div>
+
+            <h3>📱 Modo Mobile</h3>
+            <div class="command">
+                cypress open --config viewportWidth=375,viewportHeight=667
+            </div>
+
+            <h3>🎯 Capítulos Recomendados para Modo Interativo</h3>
+            <ul>
+                <li><strong>Capítulo 3:</strong> Para aprender comandos básicos</li>
+                <li><strong>Capítulo 4:</strong> Para ver assertions em ação</li>
+                <li><strong>Capítulo 5:</strong> Para debugging</li>
+                <li><strong>Capítulo 6:</strong> Para TDD com aplicação React</li>
+                <li><strong>Real World App:</strong> Para prática completa</li>
+            </ul>
+        </div>
+
+        <div class="info">
+            <h3>📞 Suporte</h3>
+            <p>Para problemas ou dúvidas:</p>
+            <ul>
+                <li>Verifique se o Cypress está na versão 6.2.1</li>
+                <li>Execute npm install em cada capítulo</li>
+                <li>Use o modo cypress:open para debug</li>
+                <li>Verifique screenshots e vídeos em caso de falhas</li>
+            </ul>
+        </div>
+
+        <div class="success">
+            <h3>🎉 Próximos Passos</h3>
+            <ol>
+                <li>Comece pelo Capítulo 3 para entender o básico</li>
+                <li>Use cypress:open para aprendizado interativo</li>
+                <li>Pratique com o Real World App</li>
+                <li>Explore diferentes browsers e configurações</li>
+                <li>Experimente os comandos avançados do Capítulo 3</li>
+            </ol>
+        </div>
+    </div>
+</body>
+</html>
