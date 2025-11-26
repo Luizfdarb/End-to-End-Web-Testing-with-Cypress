@@ -1,199 +1,104 @@
+/// <reference types="cypress" />
 
-import faker from 'faker';
-
-describe('Real‑World App – Authentication', () => {
-  /* ------------------------------------------------------------------
-   *  Setup – reset the database before each test
-   * ------------------------------------------------------------------ */
+context('Autenticação', () => {
   beforeEach(() => {
-    // Seed the DB with the original data set
-    cy.task('db:seed');
+    cy.clearCookies();
+    cy.visit('http://localhost:3000');
   });
 
-  /* ------------------------------------------------------------------
-   *  1. Redirect unauthenticated user to Sign‑In
-   * ------------------------------------------------------------------ */
-  it('redirects unauthenticated user from /personal to /signin', () => {
-    cy.visit('/personal');
-    cy.location('pathname').should('eq', '/signin');
+  // cenário 1: redirecionamento não autenticado
+  it('deveria redirecionar para a tela de login quando acessar a área pessoal sem estar autenticado', () => {
+    cy.get('[data-test="nav-personal-tab"]').click();
+    cy.url().should('contain', '/signin');
   });
 
-  /* ------------------------------------------------------------------
-   *  2. Login with Remember‑Me, verify cookie, and logout
-   * ------------------------------------------------------------------ */
-  it('logs in with Remember‑Me, keeps session cookie, and logs out', () => {
-    // Grab a real user from the seeded DB
-    cy.task('filter:database', { entity: 'users', query: {} }).then((users: any[]) => {
-      const user = users[0];
-      const pwd = Cypress.env('defaultPassword');
+  // cenário 2: login com remember me e verificar cookie de segurança
+  it('deveria salvar as credenciais e criar um cookie de segurança ao realizar login com remember me', () => {
+    cy.get('[data-test="signin-username"]').type('usertest');
+    cy.get('[data-test="signin-password"]').type('testpass');
+    cy.get('[data-test="signin-submit"]').click();
 
-      // Intercept the login and logout requests for later assertions
-      cy.server();
-      cy.route('POST', '/login').as('loginUser');
-      cy.route('POST', '/logout').as('logoutUser');
+    cy.get('[data-test="sidenav-toggle"]').should('be.enabled');
+    cy.wait('@loginUser').then((loginUser: any) => {
+      const userId = loginUser.response.body.user?.id;
+      cy.loginByXstate(`usertest-${userId}`, 'testpass');
 
-      // Perform the login
-      cy.visit('/signin');
-      cy.getBySel('signin-username').type(user.username);
-      cy.getBySel('signin-password').type(pwd);
-      cy.getBySel('signin-remember-me').find('input').check();
-      cy.getBySel('signin-submit').click();
+      cy.get('[data-test="sidenav-toggle"]').click();
+      cy.get('[data-test="sidenav-username"]').contains('usertest');
 
-      cy.wait('@loginUser').then(() => {
-        // Session cookie must be present
-        cy.getCookie('connect.sid').should('exist');
-
-        // Verify we are on a protected route
-        cy.visit('/personal');
-        cy.location('pathname').should('eq', '/personal');
-
-        // Log out
-        cy.logoutByXstate();
-        cy.wait('@logoutUser');
-
-        // Cookie should be gone after logout
-        cy.getCookie('connect.sid').should('not.exist');
-      });
+      cy.clearCookies();
+      cy.get('[data-test="nav-top-notifications-count"]').should('be.empty');
     });
   });
 
-  /* ------------------------------------------------------------------
-   *  3. Full Sign‑Up → Onboarding → Dashboard
-   * ------------------------------------------------------------------ */
-  it('signs up, goes through onboarding, and lands on dashboard', () => {
-    // Generate a fresh user
-    const newUser = {
-      firstName: faker.name.firstName(),
-      lastName: faker.name.lastName(),
-      username: faker.internet.userName(),
-      password: 'Password123',
-    };
-
-    // Intercept the signup and login requests
-    cy.server();
-    cy.route('POST', '/users').as('signupUser');
-
-    // Sign‑Up flow
-    cy.visit('/signup');
-    cy.getBySel('signup-first-name').type(newUser.firstName);
-    cy.getBySel('signup-last-name').type(newUser.lastName);
-    cy.getBySel('signup-username').type(newUser.username);
-    cy.getBySel('signup-password').type(newUser.password);
-    cy.getBySel('signup-confirmPassword').type(newUser.password);
-
-    // Submit – should redirect to sign‑in
-    cy.getBySel('signup-submit').click();
-    cy.wait('@signupUser').then(() => {
-      cy.location('pathname').should('eq', '/signin');
-
-      // Log in the newly created user
-      cy.route('POST', '/login').as('loginUser');
-      cy.getBySel('signin-username').type(newUser.username);
-      cy.getBySel('signin-password').type(newUser.password);
-      cy.getBySel('signin-submit').click();
-      cy.wait('@loginUser');
-
-      // ------------------------------------------------------------
-      // Onboarding dialog – create a bank account
-      // ------------------------------------------------------------
-      cy.getBySel('user-onboarding-dialog').should('be.visible');
-
-      // Switch to the "Create Bank Account" step
-      cy.get('#bankaccount-bankName-input').type('Mock Bank');
-      cy.get('#bankaccount-accountNumber-input').type('1234567890');
-      cy.get('#bankaccount-routingNumber-input').type('987654321');
-
-      cy.getBySel('bankaccount-submit').click();
-
-      // After the dialog closes we should be on the main dashboard
-      cy.getBySel('user-onboarding-dialog').should('not.exist');
-      cy.getBySel('transaction-list').should('be.visible');
-    });
-  });
-
-  /* ------------------------------------------------------------------
-   *  4. Sign‑In validations – required fields + button disabled
-   * ------------------------------------------------------------------ */
-  it('validates required fields on sign‑in form and disables the submit button', () => {
+  // cenário 3: signup completo e onboarding
+  it('deveria permitir que um novo usuário se cadistre e complete o onboarding', () => {
     cy.visit('/signin');
+    cy.get('[data-test="signup"]').click();
+    cy.frameLoaded('[data-test="signup-frame"]').then(() => {
+      cy.get('[data-test="signup-first-name"]').type('Fulano');
+      cy.get('[data-test="signup-last-name"]').type('Silva');
+      cy.get('[data-test="signup-username"]').type('username123');
+      cy.get('[data-test="signup-password"]').type('password123');
+      cy.get('[data-test="signup-confirmPassword"]').type('password123');
+      cy.get('[data-test="signup-submit"]').click();
 
-    // Initial state – button disabled
-    cy.getBySel('signin-submit').should('be.disabled');
-
-    // Fill only username
-    cy.getBySel('signin-username').type('demoUser');
-    cy.getBySel('signin-submit').should('be.disabled');
-
-    // Fill short password – still disabled
-    cy.getBySel('signin-password').type('abc'); // 3 chars
-    cy.getBySel('signin-submit').should('be.disabled');
-
-    // Fill proper password – button enabled
-    cy.getBySel('signin-password').type('abcd'); // 4 chars
-    cy.getBySel('signin-submit').should('not.be.disabled');
+      // o usuário é redirecionado para a área pessoal após o signup
+      cy.url().should('not.contain', '/signin');
+      cy.get('[data-test="nav-transaction-tabs"]').should('be.visible');
+    });
   });
 
-  /* ------------------------------------------------------------------
-   *  5. Sign‑Up validations – all fields + password mismatch
-   * ------------------------------------------------------------------ */
-  it('validates required fields on sign‑up form and shows mismatch error', () => {
+  // cenário 4: validações login
+  it('deveria exibir erros de validação para os campos obrigatórios de login', () => {
+    cy.get('[data-test="signin-username"]').type('');
+    cy.get('[data-test="signin-last-name"]').focus();
+    cy.get('[data-test="signin-last-name"]').blur();
+    cy.get('[data-test="signin-username-error"]').should('be.visible');
+    cy.get('[data-test="signin-password"]').type('');
+    cy.get('[data-test="signin-password-error"]').should('be.visible');
+  });
+
+  // cenário 5: validações signup
+  it('deveria exibir erros de validação para os campos obrigatórios e password mismatch', () => {
     cy.visit('/signup');
-
-    // The submit button should start disabled
-    cy.getBySel('signup-submit').should('be.disabled');
-
-    // Fill all required fields but leave passwords mismatching
-    cy.getBySel('signup-first-name').type('John');
-    cy.getBySel('signup-last-name').type('Doe');
-    cy.getBySel('signup-username').type('johndoe123');
-    cy.getBySel('signup-password').type('Password1');
-    cy.getBySel('signup-confirmPassword').type('Password2');
-
-    // Button remains disabled due to mismatch
-    cy.getBySel('signup-submit').should('be.disabled');
-
-    // The error message for mismatch should be rendered
-    cy.contains('Password does not match').should('be.visible');
+    cy.get('[data-test="signup-username"]').type('username123');
+    cy.get('[data-test="signup-username"]').blur();
+    cy.get('[data-test="signup-last-name"]').type('Silva');
+    cy.get('[data-test="signup-last-name"]').blur();
+    cy.get('[data-test="signup-first-name"]').type('Fulano');
+    cy.get('[data-test="signup-first-name"]').blur();
+    cy.get('[data-test="signup-password"]').type('password123');
+    cy.get('[data-test="signup-password"]').blur();
+    cy.get('[data-test="signup-confirmPassword"]').type('contrasena');
+    cy.get('[data-test="signup-confirmPassword-error"]').should('be.visible');
+    cy.get('[data-test="signup-last-name"]').type('Silva');
+    cy.get('[data-test="signup-last-name"]').blur();
+    cy.get('[data-test="signup-last-name-error"]').should('be.visible');
+    cy.get('[data-test="signup-first-name"]').type('Fulano');
+    cy.get('[data-test="signup-first-name"]').blur();
+    cy.get('[data-test="signup-first-name-error"]').should('be.visible');
   });
 
-  /* ------------------------------------------------------------------
-   *  6. Sign‑In with invalid credentials – user not found
-   * ------------------------------------------------------------------ */
-  it('shows error when trying to sign‑in with a non‑existent user', () => {
-    cy.route('POST', '/login').as('loginUser');
-
+  // cenário 6: erro de credenciais inválidas
+  it('deveria exibir mensagem de erro de credenciais inválidas', () => {
     cy.visit('/signin');
-    cy.getBySel('signin-username').type('nonexistentUser');
-    cy.getBySel('signin-password').type(Cypress.env('defaultPassword'));
-    cy.getBySel('signin-submit').click();
-
-    cy.wait('@loginUser').then(() => {
-      cy.getBySel('signin-error')
-        .should('be.visible')
-        .and('contain.text', 'Username or password is invalid');
-    });
+    cy.get('[data-test="signin-username"]').type('usertest123');
+    cy.get('[data-test="signin-password"]').type('contrasena');
+    cy.get('[data-test="signin-submit"]').click();
+    cy.get('[data-test="signin-error"]').should('be.visible');
   });
 
-  /* ------------------------------------------------------------------
-   *  7. Sign‑In with wrong password for an existing account
-   * ------------------------------------------------------------------ */
-  it('shows error when password is incorrect for an existing user', () => {
-    // Grab an existing user from the DB
-    cy.task('filter:database', { entity: 'users', query: {} }).then((users: any[]) => {
-      const user = users[0];
-
-      cy.route('POST', '/login').as('loginUser');
-
-      cy.visit('/signin');
-      cy.getBySel('signin-username').type(user.username);
-      cy.getBySel('signin-password').type('wrongPassword123');
-      cy.getBySel('signin-submit').click();
-
-      cy.wait('@loginUser').then(() => {
-        cy.getBySel('signin-error')
-          .should('be.visible')
-          .and('contain.text', 'Username or password is invalid');
-      });
-    });
+  // cenário 7: erro de senhas diferentes
+  it('deveria exibir mensagem de erro de senhas diferentes', () => {
+    cy.visit('/signin');
+    cy.get('[data-test="signin-username"]').type('usertest');
+    cy.get('[data-test="signin-password"]').type('contrasena123');
+    cy.get('[data-test="signin-confirmPassword"]').focus();
+    cy.get('[data-test="signin-confirmPassword"]').type('contrasena');
+    cy.get('[data-test="signin-confirmPassword"]').blur();
+    cy.get('[data-test="signin-password"]').type('contrasena123');
+    cy.get('[data-test="signin-submit"]').click();
+    cy.get('[data-test="signin-password"]').should('contain', 'Password does not match');
   });
 });

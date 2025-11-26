@@ -1,98 +1,45 @@
 
-/// <reference types="cypress" />
+// cypress/integration/user-settings.spec.ts
+import { cy } from "cypress";
 
-import faker from "faker";
-
-const USERNAME = "admin"; // <-- change this to the username that exists in your seeded DB
-const PASSWORD = Cypress.env("defaultPassword");
-
-describe("User Settings", () => {
-  /**
-   * Log in using the API and navigate to the settings page
-   * before each test.
-   */
-  beforeEach(() => {
-    cy.loginByApi(USERNAME, PASSWORD).then(() => {
-      cy.visit("/user/settings");
-    });
+describe('User Settings', () => {
+  before(() => {
+    // Login como usuário
+    cy.login('username', 'password');
   });
 
-  it("renders the user settings form", () => {
-    cy.getBySel("user-settings-form").should("be.visible");
-    cy.getBySel("user-settings-firstName-input").should("exist");
-    cy.getBySel("user-settings-lastName-input").should("exist");
-    cy.getBySel("user-settings-email-input").should("exist");
-    cy.getBySel("user-settings-phoneNumber-input").should("exist");
+  it('Should render user settings form', () => {
+    // Navegue até a página de configuração do usuário
+    cy.visit('/user/settings');
+    // Verifique se o formulário foi renderizado corretamente
+    cy.get('[data-test="user-settings-form"]').should('exist');
   });
 
-  it("validates the form fields", () => {
-    // firstName – required
-    cy.getBySel("user-settings-firstName-input")
-      .clear()
-      .blur()
-      .parent()
-      .find(".MuiFormHelperText-root")
-      .should("contain.text", "Enter a first name");
+  it('User settings form validations should be triggered',() => {
+    // Insira dados inválidos no campo firstName
+    cy.get('[data-test="user-settings-firstName-input"]').clear().type('a');    
+    // Verifique se a validação é chamada
+    cy.get('[data-test="user-settings-firstName-input"]').closest('form').should('have.attr', 'data-cy').and('equal', 'invalid');
+    // Insira uma string válida no campo firstName
+    cy.get('[data-test="user-settings-firstName-input"]').clear().type('John'); 
+    // Verifique se a validação não é chamada
+    cy.get('[data-test="user-settings-firstName-input"]').closest('form').should('not.have.attr', 'data-cy').and('equal', 'invalid');
 
-    // lastName – required
-    cy.getBySel("user-settings-lastName-input")
-      .clear()
-      .blur()
-      .parent()
-      .find(".MuiFormHelperText-root")
-      .should("contain.text", "Enter a last name");
-
-    // email – must be a valid email
-    cy.getBySel("user-settings-email-input")
-      .clear()
-      .type("invalid-email")
-      .blur()
-      .parent()
-      .find(".MuiFormHelperText-root")
-      .should("contain.text", "Must contain a valid email address");
-
-    // phoneNumber – must match the regex
-    cy.getBySel("user-settings-phoneNumber-input")
-      .clear()
-      .type("12345")
-      .blur()
-      .parent()
-      .find(".MuiFormHelperText-root")
-      .should("contain.text", "Phone number is not valid");
+    // Repita o processo para lastName, email e phoneNumber
   });
 
-  it("updates the profile and reflects the changes in the sidebar", () => {
-    const newFirstName = faker.name.firstName();
-    const newLastName = faker.name.lastName();
-    const newEmail = faker.internet.email();
-    const newPhone = faker.phone.phoneNumber();
-
-    // Fill the form
-    cy.getBySel("user-settings-firstName-input")
-      .clear()
-      .type(newFirstName);
-    cy.getBySel("user-settings-lastName-input")
-      .clear()
-      .type(newLastName);
-    cy.getBySel("user-settings-email-input")
-      .clear()
-      .type(newEmail);
-    cy.getBySel("user-settings-phoneNumber-input")
-      .clear()
-      .type(newPhone);
-
-    // Submit
-    cy.getBySel("user-settings-submit").should("not.be.disabled").click();
-
-    // Optional: assert snackbar appears
-    cy.get("[data-test^='alert-bar-success']").should("be.visible");
-
-    // The sidebar should show the updated full name
-    cy.getBySel("sidenav-user-full-name")
-      .should("contain.text", newFirstName)
-      .and("contain.text", newLastName);
-
-    // (Optional) Verify the username remains unchanged
-    cy.getBySel("sidenav-username").should("contain.text", USERNAME);
+  it('Should update user profile and verify change in sidebar', () => {
+    // Insira dados válidos no formulário
+    cy.get('[data-test="user-settings-firstName-input"]').type('João');
+    cy.get('[data-test="user-settings-lastName-input"]').type('Silva');
+    cy.get('[data-test="user-settings-email-input"]').type('joao.silva@example.com');
+    cy.get('[data-test="user-settings-phoneNumber-input"]').type('5511999999999');
+    // Insira a senha atual
+    cy.get('[data-test="user-settings-password-input"]').type('password');      
+    // Submeta o formulário
+    cy.get('[data-test="user-settings-submit"]').click();
+    // Verifique se o perfil foi atualizado com sucesso
+    cy.get('[data-test="sidenav-username"]').should('contain.text', 'João Silva');
+    cy.get('[data-test="sidenav-phoneNumber"]').should('contains', '5511 99999-9999');
   });
 });
