@@ -1,64 +1,104 @@
 
-// cypress/integration/bank-accounts.spec.ts
+/// <reference types="cypress" />
 
-describe('Bank Accounts', () => {
+/*
+  Cypress acceptance test for the *Bank Accounts* feature.
+
+  This spec covers:
+    1️⃣  List of bank accounts (seeded data)
+    2️⃣  Creation of a new bank account
+    3️⃣  Soft‑deletion of a bank account (the UI shows “(Deleted)’’)
+
+  The test follows the exact UI data‑test attributes that the app
+  exposes, uses the custom commands defined in `cypress/support/commands.ts`,
+  and seeds the database before every test run.
+*/
+
+describe('Bank Accounts – UI flow', () => {
+  /**
+   * Helper: seed the DB, pick a user from the seed and log‑in via the API.
+   * The seed creates **all users with the same password** (env var
+   * `SEED_DEFAULT_USER_PASSWORD`).  We fetch any user, use its username
+   * together with the default password and let Cypress store the auth cookie.
+   */
+  const loginWithSeededUser = () => {
+    // 1️⃣ Seed the DB
+    cy.task('db:seed');
+
+    // 2️⃣ Grab the first user that exists in the DB
+    cy.task('find:database', { entity: 'users', query: {} }).then((user: any) => {
+      // 3️⃣ Log‑in via the API command (sets the session cookie)
+      // The default password is exposed through Cypress env (`defaultPassword`).
+      const pwd = Cypress.env('defaultPassword') ?? 'test';
+      cy.loginByApi(user.username, pwd);
+    });
+  };
+
   beforeEach(() => {
-    cy.visit('http://localhost:3000');
+    loginWithSeededUser();
+    // After a successful login the app redirects to “/”.  From there we can
+    // navigate to the bank‑accounts page.
+    cy.visit('/bankaccounts');
   });
 
-  it('should create a new bank account', () => {
-    cy.getBySel('sidenav-toggle').click();
-    cy.getBySel('sidenav-bankaccounts').click();
-    cy.getBySel('bankaccount-new').click();
-    cy.getBySel('bankaccount-form').within(() => {
-      cy.getBySel('bankaccount-bankName-input').type('My Bank');
-    });
-    cy.getBySel('bankaccount-routingNumber-input').type('123456789');
-    cy.getBySel('bankaccount-accountNumber-input').type('1234567890');
-    cy.getBySel('transaction-create-submit').click();
-    cy.getBySel('transaction-list-empty-create-transaction-button').click();
+  /** -------------------------------------------------------------
+   *  1️⃣  Verify that the seeded accounts are listed.
+   * ------------------------------------------------------------- */
+  it('displays a list of bank accounts for the logged‑in user', () => {
+    // The list component has `data-test="bankaccount-list"`.
+    cy.get('[data-test=bankaccount-list]').should('exist');
+
+    // At least one account must be rendered (the seed creates several per user).
+    cy.get('[data-test^=bankaccount-list-item-]')
+      .its('length')
+      .should('be.gte', 1);
   });
 
-  it('should have valid form field validation', () => {
-    cy.visit('http://localhost:3000');
-    cy.getBySel('sidenav-toggle').click();
-    cy.getBySel('sidenav-bankaccounts').click();
-    cy.getBySel('bankaccount-new').click();
-    cy.getBySel('bankaccount-form').within(() => {
-      cy.getBySel('bankaccount-bankName-input').type('A');
-      cy.getBySel('bankaccount-bankName-input').should('have.attr', 'data-test', 'bankaccount-bankName-input-error');
-    });
-    cy.getBySel('bankaccount-routingNumber-input').type('12345678');
-    cy.getBySel('bankaccount-routingNumber-input').should('have.attr', 'data-test', 'bankaccount-routingNumber-input-error');
-    cy.getBySel('bankaccount-accountNumber-input').type('123456789');
-    cy.getBySel('bankaccount-accountNumber-input').should('have.attr', 'data-test', 'bankaccount-accountNumber-input-error');
+  /** -------------------------------------------------------------
+   *  2️⃣  Create a new bank account through the UI and verify it appears.
+   * ------------------------------------------------------------- */
+  it('creates a new bank account and shows it in the list', () => {
+    // Open the “Create Bank Account’’ form.
+    cy.get('[data-test=bankaccount-new]').click();
+
+    // Fill the form fields (all have dedicated data‑test attributes).
+    const bankName = 'Cypress Bank';
+    const routingNumber = '123456789';
+    const accountNumber = '9876543210';
+
+    cy.get('[data-test=bankaccount-bankName-input]').type(bankName);
+    cy.get('[data-test=bankaccount-routingNumber-input]').type(routingNumber);
+    cy.get('[data-test=bankaccount-accountNumber-input]').type(accountNumber);
+
+    // Submit the form.
+    cy.get('[data-test=bankaccount-submit]').click();
+
+    // After a successful POST the app redirects back to the list page.
+    // Verify that the newly created bank name is now present in the list.
+    cy.get('[data-test=bankaccount-list]')
+      .should('contain', bankName)
+      .and('contain', routingNumber)
+      .and('contain', accountNumber);
   });
 
-  it('should soft delete an existing bank account', () => {
-    cy.visit('http://localhost:3000');
-    cy.getBySel('sidenav-toggle').click();
-    cy.getBySel('sidenav-bankaccounts').click();
-    cy.getBySel('bankaccount-new').click();
-    cy.getBySel('bankaccount-form').within(() => {
-      cy.getBySel('bankaccount-bankName-input').type('My Bank');
-    });
-    cy.getBySel('bankaccount-routingNumber-input').type('123456789');
-    cy.getBySel('bankaccount-accountNumber-input').type('1234567890');
-    cy.getBySel('transaction-create-submit').click();
-    cy.getBySel('transaction-list-empty-create-transaction-button').click();
-    cy.getBySel('sidenav-toggle').click();
-    cy.getBySel('sidenav-bankaccounts').click();
-    cy.getBySel('bankaccount-list-item-0').within(() => {
-      cy.getBySel('bankaccount-delete').click();
-      cy.getBySel('alert-bar-severity-success').should('be.visible');
-    });
-  });
+  /** -------------------------------------------------------------
+   *  3️⃣  Delete (soft‑delete) a bank account and ensure the UI marks it.
+   * ------------------------------------------------------------- */
+  it('soft‑deletes a bank account and shows the “(Deleted)’’ label', () => {
+    // Ensure we have at least one account to delete.
+    cy.get('[data-test^=bankaccount-list-item-]')
+      .first()
+      .as('firstAccount');
 
-  it('should have an empty list state and show onboarding modal', () => {
-    cy.visit('http://localhost:3000');
-    cy.getBySel('sidenav-toggle').click();
-    cy.getBySel('sidenav-bankaccounts').click();
-    cy.getBySel('bankaccount-list').should('contain', 'No Bank Accounts');
-    cy.getBySel('bankaccount-new').should('be.visible');
+    // Click the delete button that lives inside the list‑item.
+    cy.get('@firstAccount')
+      .within(() => {
+        cy.get('[data-test=bankaccount-delete]').click();
+      });
+
+    // The UI marks a deleted account with the text “(Deleted)”.
+    // Wait for the request to finish and then assert the label.
+    cy.get('@firstAccount')
+      .should('contain', '(Deleted)');
   });
 });

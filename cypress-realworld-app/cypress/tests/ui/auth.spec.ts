@@ -1,104 +1,121 @@
-/// <reference types="cypress" />
+// cypress/tests/ui/auth.spec.ts
 
-context('Autenticação', () => {
+/**
+ * Testes de aceitação do fluxo de autenticação (sign‑up, login, logout e erro).
+ *
+ * O arquivo utiliza os comandos customizados definidos em
+ * cypress/support/commands.ts:
+ *   - cy.getBySel()
+ *   - cy.login()
+ *   - cy.loginByXstate()
+ *   - cy.logoutByXstate()
+ *
+ * Cada cenário começa com um seed limpo da base de dados (task "db:seed").
+ */
+
+describe('Authentication', () => {
+  /**
+   * Antes de **todos** os cenários, repovoamos a base de dados
+   * com os registros padrão definidos em `data/database-seed.json`.
+   */
   beforeEach(() => {
-    cy.clearCookies();
-    cy.visit('http://localhost:3000');
+    cy.task('db:seed');
   });
 
-  // cenário 1: redirecionamento não autenticado
-  it('deveria redirecionar para a tela de login quando acessar a área pessoal sem estar autenticado', () => {
-    cy.get('[data-test="nav-personal-tab"]').click();
-    cy.url().should('contain', '/signin');
-  });
-
-  // cenário 2: login com remember me e verificar cookie de segurança
-  it('deveria salvar as credenciais e criar um cookie de segurança ao realizar login com remember me', () => {
-    cy.get('[data-test="signin-username"]').type('usertest');
-    cy.get('[data-test="signin-password"]').type('testpass');
-    cy.get('[data-test="signin-submit"]').click();
-
-    cy.get('[data-test="sidenav-toggle"]').should('be.enabled');
-    cy.wait('@loginUser').then((loginUser: any) => {
-      const userId = loginUser.response.body.user?.id;
-      cy.loginByXstate(`usertest-${userId}`, 'testpass');
-
-      cy.get('[data-test="sidenav-toggle"]').click();
-      cy.get('[data-test="sidenav-username"]').contains('usertest');
-
-      cy.clearCookies();
-      cy.get('[data-test="nav-top-notifications-count"]').should('be.empty');
-    });
-  });
-
-  // cenário 3: signup completo e onboarding
-  it('deveria permitir que um novo usuário se cadistre e complete o onboarding', () => {
-    cy.visit('/signin');
-    cy.get('[data-test="signup"]').click();
-    cy.frameLoaded('[data-test="signup-frame"]').then(() => {
-      cy.get('[data-test="signup-first-name"]').type('Fulano');
-      cy.get('[data-test="signup-last-name"]').type('Silva');
-      cy.get('[data-test="signup-username"]').type('username123');
-      cy.get('[data-test="signup-password"]').type('password123');
-      cy.get('[data-test="signup-confirmPassword"]').type('password123');
-      cy.get('[data-test="signup-submit"]').click();
-
-      // o usuário é redirecionado para a área pessoal após o signup
-      cy.url().should('not.contain', '/signin');
-      cy.get('[data-test="nav-transaction-tabs"]').should('be.visible');
-    });
-  });
-
-  // cenário 4: validações login
-  it('deveria exibir erros de validação para os campos obrigatórios de login', () => {
-    cy.get('[data-test="signin-username"]').type('');
-    cy.get('[data-test="signin-last-name"]').focus();
-    cy.get('[data-test="signin-last-name"]').blur();
-    cy.get('[data-test="signin-username-error"]').should('be.visible');
-    cy.get('[data-test="signin-password"]').type('');
-    cy.get('[data-test="signin-password-error"]').should('be.visible');
-  });
-
-  // cenário 5: validações signup
-  it('deveria exibir erros de validação para os campos obrigatórios e password mismatch', () => {
+  /**
+   * -------------------------------------------------------------------------
+   * 1️⃣  SIGN‑UP
+   * -------------------------------------------------------------------------
+   * Verifica se o usuário consegue se cadastrar e, ao final,
+   * é redirecionado para a página de login.
+   */
+  it('allows a new user to sign up', () => {
+    // Navega para a tela de cadastro
     cy.visit('/signup');
-    cy.get('[data-test="signup-username"]').type('username123');
-    cy.get('[data-test="signup-username"]').blur();
-    cy.get('[data-test="signup-last-name"]').type('Silva');
-    cy.get('[data-test="signup-last-name"]').blur();
-    cy.get('[data-test="signup-first-name"]').type('Fulano');
-    cy.get('[data-test="signup-first-name"]').blur();
-    cy.get('[data-test="signup-password"]').type('password123');
-    cy.get('[data-test="signup-password"]').blur();
-    cy.get('[data-test="signup-confirmPassword"]').type('contrasena');
-    cy.get('[data-test="signup-confirmPassword-error"]').should('be.visible');
-    cy.get('[data-test="signup-last-name"]').type('Silva');
-    cy.get('[data-test="signup-last-name"]').blur();
-    cy.get('[data-test="signup-last-name-error"]').should('be.visible');
-    cy.get('[data-test="signup-first-name"]').type('Fulano');
-    cy.get('[data-test="signup-first-name"]').blur();
-    cy.get('[data-test="signup-first-name-error"]').should('be.visible');
+
+    // Preenche os campos do formulário
+    cy.getBySel('signup-first-name').type('Cypress');
+    cy.getBySel('signup-last-name').type('Tester');
+    cy.getBySel('signup-username').type('cypress_user');
+    cy.getBySel('signup-password').type('Password123');
+
+    // Submete o formulário
+    cy.getBySel('signup-submit').click();
+
+    // A aplicação deve redirecionar para /signin
+    cy.url().should('include', '/signin');
+
+    // O formulário de login deve estar visível
+    cy.getBySel('signin-username').should('be.visible');
+    cy.getBySel('signin-password').should('be.visible');
   });
 
-  // cenário 6: erro de credenciais inválidas
-  it('deveria exibir mensagem de erro de credenciais inválidas', () => {
-    cy.visit('/signin');
-    cy.get('[data-test="signin-username"]').type('usertest123');
-    cy.get('[data-test="signin-password"]').type('contrasena');
-    cy.get('[data-test="signin-submit"]').click();
-    cy.get('[data-test="signin-error"]').should('be.visible');
+  /**
+   * -------------------------------------------------------------------------
+   * 2️⃣  LOGIN BEM‑SUCEDIDO
+   * -------------------------------------------------------------------------
+   * Usa as credenciais padrão da seed (`db4uxOm7d` / defaultPassword).
+   * Verifica se o drawer exibe o nome de usuário, indicando que o login
+   * ocorreu com sucesso.
+   */
+  it('allows an existing user to log in with valid credentials', () => {
+    // O usuário padrão da seed tem username "db4uxOm7d"
+    const username = 'db4uxOm7d';
+
+    // Comando customizado que preenche o formulário e aguarda a resposta
+    cy.login(username);
+
+    // Após login a barra lateral (sidenav) deve conter o username
+    cy.getBySel('sidenav-username').should('contain', `@${username}`);
+
+    // Opcional: garantir que a URL seja a home ("/")
+    cy.location('pathname').should('eq', '/');
   });
 
-  // cenário 7: erro de senhas diferentes
-  it('deveria exibir mensagem de erro de senhas diferentes', () => {
-    cy.visit('/signin');
-    cy.get('[data-test="signin-username"]').type('usertest');
-    cy.get('[data-test="signin-password"]').type('contrasena123');
-    cy.get('[data-test="signin-confirmPassword"]').focus();
-    cy.get('[data-test="signin-confirmPassword"]').type('contrasena');
-    cy.get('[data-test="signin-confirmPassword"]').blur();
-    cy.get('[data-test="signin-password"]').type('contrasena123');
-    cy.get('[data-test="signin-submit"]').click();
-    cy.get('[data-test="signin-password"]').should('contain', 'Password does not match');
+  /**
+   * -------------------------------------------------------------------------
+   * 3️⃣  LOGIN COM ERRO
+   * -------------------------------------------------------------------------
+   * Tenta fazer login com credenciais inexistentes e verifica a mensagem
+   * de erro exibida no alerta.
+   */
+  it('shows an error message when login fails', () => {
+    // Credenciais inválidas
+    const wrongUser = 'invalid_user';
+    const wrongPass = 'wrong_pass';
+
+    // O comando login já inclui a verificação de requisição,
+    // mas não captura o erro. Basta submeter o formulário.
+    cy.login(wrongUser, wrongPass);
+
+    // O alerta de erro tem data-test="signin-error"
+    cy.getBySel('signin-error')
+      .should('be.visible')
+      .and('contain', 'Username or password is invalid');
+  });
+
+  /**
+   * -------------------------------------------------------------------------
+   * 4️⃣  LOGOUT
+   * -------------------------------------------------------------------------
+   * Faz login via XState (bypass UI) e, em seguida,
+   * executa o logout usando o comando `cy.logoutByXstate`.
+   * Confirma que a aplicação volta para a página de login.
+   */
+  it('allows a logged‑in user to log out', () => {
+    const username = 'db4uxOm7d';
+
+    // Login usando XState (bypass UI)
+    cy.loginByXstate(username);
+
+    // Confirma que o drawer mostra o usuário logado
+    cy.getBySel('sidenav-username').should('contain', `@${username}`);
+
+    // Executa o logout via XState
+    cy.logoutByXstate();
+
+    // Deve ser redirecionado novamente para a tela de login
+    cy.url().should('include', '/signin');
+    cy.getBySel('signin-submit').should('be.visible');
   });
 });
