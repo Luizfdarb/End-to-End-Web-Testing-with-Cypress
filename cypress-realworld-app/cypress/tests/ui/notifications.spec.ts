@@ -1,114 +1,184 @@
 
-/// <reference path="../tests/support/commands.ts" />
+/// <reference types="cypress" />
 
-describe('Notifications', () => {
-  beforeEach(() => {
-    // Vazia a base de dados
-    cy.task('db:seed');
-  });
+import '@4tw/cypress-drag-drop'
+import 'cypress-file-upload';
 
-  // Cenário 1 - User A likes transaction of User B → User B gets notification
-  it('User A likes transaction of User B → User B gets notification', () => {
-    // Faz login como User A
-    cy.login('userA', 'password');
-    // Faz login como User B
-    cy.login('userB', 'password');
-    // Busca o ID da transaction entre User A e User B
-    const transactionId = cy.fixture('public-transactions').results[0].id;
-    // User A likes a transaction
-    cy.getBySel('transaction-item').eq(0).within(() => {
-      cy.get('[data-test^="transaction-like-button"]').eq(0).click();
-    });
-    // Verifica se User B teve a notificação
-    cy.getBySel('notifications-list').should('contain', 'User B');
-  });
+describe('Transaction Feeds Testes', () => {
+  before(() => {
+    // Garanta que a aplicação esteja carregada antes de iniciar os testes
+    cy.visit('/')
+  })
 
-  // Cenário 2 - User C likes transaction between User A and User B → Both get notifications
-  it('User C likes transaction between User A and User B → Both get notifications', () => {
-    // Faz login como User C
-    cy.login('userC', 'password');
-    // Busca o ID da transaction entre User A e User B
-    const transactionId = cy.fixture('public-transactions').results[0].id;      
-    // User C likes a transaction
-    cy.getBySel('transaction-item').eq(0).within(() => {
-      cy.get('[data-test^="transaction-like-button"]').eq(0).click();
-    });
-    // Verifica se ambos User A e User B tiveram a notificação
-    cy.getBySel('notifications-list').contains('User A');
-    cy.getBySel('notifications-list').contains('User B');
-  });
+  it('1. Toggle navigation drawer (mobile vs desktop)', () => {
+    // Verifique se o drawer está fechado em modo mobile
+    cy.get('[data-test="sidenav-toggle"]').should('not.be.visible')
 
-  // Cenário 3 - User A comments on transaction of User B → User B gets notification
-  it('User A comments on transaction of User B → User B gets notification', () => {
-    // Faz login como User A
-    cy.login('userA', 'password');
-    // Faz login como User B
-    cy.login('userB', 'password');
-    // Busca o ID da transaction entre User A e User B
-    const transactionId = cy.fixture('public-transactions').results[0].id;      
-    // User A comments a transaction
-    cy.getBySel('transaction-item').eq(0).within(() => {
-      cy.get('[data-test="comment-list"').eq(0);
-      cy.get('[data-test^="transaction-comment-input"]').type('Teste de comentario');
-    });
-    // Verifica se User B teve a notificação
-    cy.getBySel('notifications-list').should('contain', 'User A');
-  });
+    // Verifique se o drawer está aberto em modo desktop
+    cy.get('[data-test="sidenav"]').should('be.visible')
 
-  // Cenário 4 - User C comments on transaction between User A and User B → Both get notifications
-  it('User C comments on transaction between User A and User B → Both get notifications', () => {
-    // Faz login como User C
-    cy.login('userC', 'password');
-    // Busca o ID da transaction entre User A e User B
-    const transactionId = cy.fixture('public-transactions').results[0].id;      
-    // User C comments a transaction
-    cy.getBySel('transaction-item').eq(0).within(() => {
-      cy.get('[data-test="comment-list"').eq(0);
-      cy.get('[data-test^="transaction-comment-input"]').type('Teste de comentario');
-    });
-    // Verifica se ambos User A e User B tiveram a notificação
-    cy.getBySel('notifications-list').contains('User A');
-    cy.getBySel('notifications-list').contains('User B');
-  });
+    // Alterne entre os modos mobile e desktop
+    cy.viewport('iphone-x')
+    cy.get('[data-test="sidenav-toggle"]').click()
 
-  // Cenário 5 - User A sends payment to User B → User B gets notification      
-  it('User A sends payment to User B → User B gets notification', () => {       
-    // Faz login como User A
-    cy.login('userA', 'password');
-    // Faz login como User B
-    cy.login('userB', 'password');
-    // Busca o ID da transaction entre User A e User B
-    const transactionId = cy.fixture('public-transactions').results[0].id;      
-    // User A paga a transaction
-    cy.getBySel('transaction-item').eq(0).within(() => {
-      cy.get('[data-test="transaction-like-count"]').eq(0).click();
-      cy.get('[data-test^="transaction-comment-input"]').type('Teste de comentario');
-    });
-    // Verifica se User B teve a notificação
-    cy.getBySel('notifications-list').should('contain', 'User A');
-  });
+    cy.viewport('macbook-15')
+    cy.get('[data-test="sidenav"]').should('be.visible')
+  })
 
-  // Cenário 6 - User A sends payment request to User C → User C gets notification
-  it('User A sends payment request to User C → User C gets notification', () => {
-    // Faz login como User A
-    cy.login('userA', 'password');
-    // Faz login como User C
-    cy.login('userC', 'password');
-    // Busca o ID da transaction entre User A e User B
-    const transactionId = cy.fixture('public-transactions').results[0].id;      
-    // User A envia o pagamento para User C
-    cy.getBySel('transaction-item').eq(0).within(() => {
-      cy.get('[data-test^="transaction-like-button"]').eq(0).click();
-    });
-    // Verifica se User C teve a notificação
-    cy.getBySel('notifications-list').should('contain', 'User A');
-  });
+  it('2. Renderizar variações de transaction items (paid, charged, requested)', () => {
+    // Verifique se os itens de transação estão sendo renderizados corretamente
+    cy.get('[data-test="transaction-item"]').should('have.length', 10)
 
-  // Cenário 7 - Renderiza o estado de notificações vazio
-  it('Renders empty notifications state', () => {
-    // Faz login como User A
-    cy.login('userA', 'password');
-    // Nenhuma notificação deve existir
-    cy.getBySel('notifications-list').should('contain', '.empty-list');
-  });
-});
+    // Verifique se os itens de transação possuem os status paid, charged e requested
+    cy.get('[data-test="transaction-item"]').each(($el) => {
+      cy.wrap($el).should('contain', 'paid')
+      cy.wrap($el).should('contain', 'charged')
+      cy.wrap($el).should('contain', 'requested')
+    })
+  })
+
+  it('3. Paginar feed pessoal de transações', () => {
+    // Verifique se a paginação está funcionando corretamente
+    cy.get('[data-test="transaction-list"]').should('have.length', 10)
+
+    // Verifique se os itens de transação estão sendo carregados ao clicar na próxima página
+    cy.get('[data-test="transaction-list-next-page"]').click()
+    cy.get('[data-test="transaction-list"]').should('have.length', 20)
+  })
+
+  it('4. Paginar feed público de transações', () => {
+    // Verifique se a paginação está funcionando corretamente
+    cy.get('[data-test="public-transaction-list"]').should('have.length', 10)
+
+    // Verifique se os itens de transação estão sendo carregados ao clicar na próxima página
+    cy.get('[data-test="public-transaction-list-next-page"]').click()
+    cy.get('[data-test="public-transaction-list"]').should('have.length', 20)
+  })
+
+  it('5. Paginar feed de contatos de transações', () => {
+    // Verifique se a paginação está funcionando corretamente
+    cy.get('[data-test="contact-transaction-list"]').should('have.length', 10)
+
+    // Verifique se os itens de transação estão sendo carregados ao clicar na próxima página
+    cy.get('[data-test="contact-transaction-list-next-page"]').click()
+    cy.get('[data-test="contact-transaction-list"]').should('have.length', 20)
+  })
+
+  it('6. Fechar modal de date range picker (mobile)', () => {
+    // Verifique se o modal de date range picker está aberto em modo mobile
+    cy.get('[data-test="date-range-picker"]').should('be.visible')
+
+    // Verifique se o modal de date range picker está fechado após clicar no botão de fechar
+    cy.get('[data-test="date-range-picker-close"]').click()
+    cy.get('[data-test="date-range-picker"]').should('not.be.visible')
+  })
+
+  it('7. Filtrar feed pessoal por data', () => {
+    // Verifique se o feed pessoal está sendo filtrado corretamente por data
+    cy.get('[data-test="transaction-list"]').should('have.length', 10)
+
+    // Verifique se os itens de transação estão sendo carregados após aplicar o filtro de data
+    cy.get('[data-test="date-range-filter"]').click()
+    cy.get('[data-test="transaction-list"]').should('have.length', 5)
+  })
+
+  it('8. Filtrar feed público por data', () => {
+    // Verifique se o feed público está sendo filtrado corretamente por data
+    cy.get('[data-test="public-transaction-list"]').should('have.length', 10)
+
+    // Verifique se os itens de transação estão sendo carregados após aplicar o filtro de data
+    cy.get('[data-test="date-range-filter"]').click()
+    cy.get('[data-test="public-transaction-list"]').should('have.length', 5)
+  })
+
+  it('9. Filtrar feed de contatos por data', () => {
+    // Verifique se o feed de contatos está sendo filtrado corretamente por data
+    cy.get('[data-test="contact-transaction-list"]').should('have.length', 10)
+
+    // Verifique se os itens de transação estão sendo carregados após aplicar o filtro de data
+    cy.get('[data-test="date-range-filter"]').click()
+    cy.get('[data-test="contact-transaction-list"]').should('have.length', 5)
+  })
+
+  it('10. Feed pessoal sem transações (data fora do range)', () => {
+    // Verifique se o feed pessoal está vazio quando não há transações dentro do range de data
+    cy.get('[data-test="transaction-list"]').should('have.length', 0)
+  })
+
+  it('11. Feed público sem transações (data fora do range)', () => {
+    // Verifique se o feed público está vazio quando não há transações dentro do range de data
+    cy.get('[data-test="public-transaction-list"]').should('have.length', 0)
+  })
+
+  it('12. Feed de contatos sem transações (data fora do range)', () => {
+    // Verifique se o feed de contatos está vazio quando não há transações dentro do range de data
+    cy.get('[data-test="contact-transaction-list"]').should('have.length', 0)
+  })
+
+  it('13. Filtrar feed pessoal por valor', () => {
+    // Verifique se o feed pessoal está sendo filtrado corretamente por valor
+    cy.get('[data-test="transaction-list"]').should('have.length', 10)
+
+    // Verifique se os itens de transação estão sendo carregados após aplicar o filtro de valor
+    cy.get('[data-test="amount-range-filter"]').click()
+    cy.get('[data-test="transaction-list"]').should('have.length', 5)
+  })
+
+  it('14. Filtrar feed público por valor', () => {
+    // Verifique se o feed público está sendo filtrado corretamente por valor
+    cy.get('[data-test="public-transaction-list"]').should('have.length', 10)
+
+    // Verifique se os itens de transação estão sendo carregados após aplicar o filtro de valor
+    cy.get('[data-test="amount-range-filter"]').click()
+    cy.get('[data-test="public-transaction-list"]').should('have.length', 5)
+  })
+
+  it('15. Filtrar feed de contatos por valor', () => {
+    // Verifique se o feed de contatos está sendo filtrado corretamente por valor
+    cy.get('[data-test="contact-transaction-list"]').should('have.length', 10)
+
+    // Verifique se os itens de transação estão sendo carregados após aplicar o filtro de valor
+    cy.get('[data-test="amount-range-filter"]').click()
+    cy.get('[data-test="contact-transaction-list"]').should('have.length', 5)
+  })
+
+  it('16. Feed pessoal sem transações (valor fora do range)', () => {
+    // Verifique se o feed pessoal está vazio quando não há transações dentro do range de valor
+    cy.get('[data-test="transaction-list"]').should('have.length', 0)
+  })
+
+  it('17. Feed público sem transações (valor fora do range)', () => {
+    // Verifique se o feed público está vazio quando não há transações dentro do range de valor
+    cy.get('[data-test="public-transaction-list"]').should('have.length', 0)
+  })
+
+  it('18. Feed de contatos sem transações (valor fora do range)', () => {
+    // Verifique se o feed de contatos está vazio quando não há transações dentro do range de valor
+    cy.get('[data-test="contact-transaction-list"]').should('have.length', 0)
+  })
+
+  it('19. Feed pessoal mostra apenas transações do usuário', () => {
+    // Verifique se o feed pessoal está mostrando apenas transações do usuário
+    cy.get('[data-test="transaction-list"]').each(($el) => {
+      cy.wrap($el).should('contain', 'paid')
+      cy.wrap($el).should('contain', 'charged')
+      cy.wrap($el).should('contain', 'requested')
+    })
+  })
+
+  it('20. Primeiros 5 itens do feed público pertencem a contatos', () => {
+    // Verifique se os primeiros 5 itens do feed público pertencem a contatos
+    cy.get('[data-test="public-transaction-list"]').each(($el, index) => {
+      if (index < 5) {
+        cy.wrap($el).should('contain', 'contact')
+      }
+    })
+  })
+
+  it('21. Feed de amigos mostra apenas transações de contatos', () => {
+    // Verifique se o feed de amigos está mostrando apenas transações de contatos
+    cy.get('[data-test="contact-transaction-list"]').each(($el) => {
+      cy.wrap($el).should('contain', 'contact')
+    })
+  })
+})

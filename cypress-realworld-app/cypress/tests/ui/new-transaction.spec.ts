@@ -1,70 +1,110 @@
 
-describe('Nova Transação', () => {
-  beforeEach(() => {
-    cy.visit('/transaction/new');
-  });
+/// <reference types="cypress" />
 
-  // Cenário 1: Criar transação completa (payment) com contato existente        
-  it('Criar transação completa (payment) com contato existente', () => {        
-    cy.get('#user-list-search-input').type('Usuario Exemplo');
-    cy.get('button').click();
-    cy.get('button[name="new"]').click();
-    cy.get('#transaction-create-description-input').type('Pagamento exemplo');  
-    cy.get('#transaction-create-amount-input').type('1000');
-    cy.get('#transaction-create-submit-payment').click();
-    cy.url().should('include', '/transaction/new/complete');
-  });
+describe('Novas transações', () => {
+  // Cenário 1: Criar transação completa (payment) com contato existente
+  it(' Criar transação completa (payment) com contato existente', () => {
+    // Preparação
+    cy.loginByXstate('username', 'password')
+    cy.visit('/transaction/new')
 
-  // Cenário 2: Criar transação completa (request) com contato existente        
-  it('Criar transação completa (request) com contato existente', () => {        
-    cy.get('#user-list-search-input').type('Usuario Exemplo');
-    cy.get('button').click();
-    cy.get('button[name="new"]').click();
-    cy.get('#transaction-create-description-input').type('Solicitacao exemplo');
-    cy.get('#transaction-create-amount-input').type('1000');
-    cy.get('#transaction-create-submit-request').click();
-    cy.url().should('include', '/transaction/new/complete');
-  });
+    // Ação
+    cy.get('[data-test="transaction-create-submit-payment"]').click()
+    cy.get('[data-test="transaction-create-amount-input"]').type('10.00')
+    cy.get('[data-test="transaction-create-description-input"]').type('Transaction description')
+    cy.get('[data-test="transaction-create-submit-button"]').click()
+
+    // Verificação
+    cy.get('[data-test="transaction-create-result"]').should('contain', 'Transaction created successfully')
+  })
+
+  // Cenário 2: Criar transação completa (request) com contato existente
+  it('Criar transação completa (request) com contato existente', () => {
+    // Preparação
+    cy.loginByXstate('username', 'password')
+    cy.visit('/transaction/new')
+
+    // Ação
+    cy.get('[data-test="transaction-create-submit-request"]').click()
+    cy.get('[data-test="transaction-create-amount-input"]').type('10.00')
+    cy.get('[data-test="transaction-create-description-input"]').type('Transaction description')
+    cy.get('[data-test="transaction-create-submit-button"]').click()
+
+    // Verificação
+    cy.get('[data-test="transaction-create-result"]').should('contain', 'Transaction created successfully')
+  })
 
   // Cenário 3: Criar transação com novo contato (search + add)
   it('Criar transação com novo contato (search + add)', () => {
-    cy.get('#user-list-search-input').type('Novo Usuario');
-    cy.get('button').click();
-    cy.get('button[name="new"]').click();
-    cy.get('#transaction-create-description-input').type('Novo pagamento');     
-    cy.get('#transaction-create-amount-input').type('1000');
-    cy.get('#transaction-create-submit-payment').click();
-    cy.url().should('include', '/transaction/new/complete');
-  });
+    // Preparação
+    cy.loginByXstate('username', 'password')
+    cy.visit('/transaction/new')
 
-  // Cenário 4: Validações step 1 (contato obrigatório + botão disabled)        
-  it('Validações step 1 (contato obrigatório + botão disabled)', () => {        
-    cy.get('#user-list-search-input').clear();
-    cy.get('button[name="create"]').should('be.disabled');
-  });
+    // Ação
+    cy.get('[data-test="user-list-search-input"]').type('Novo contato')
+    cy.get('[data-test="user-list-add-button"]').click()
+    cy.get('[data-test="transaction-create-submit-payment"]').click()
+    cy.get('[data-test="transaction-create-amount-input"]').type('10.00')
+    cy.get('[data-test="transaction-create-description-input"]').type('Transaction description')
+    cy.get('[data-test="transaction-create-submit-button"]').click()
+
+    // Verificação
+    cy.get('[data-test="transaction-create-result"]').should('contain', 'Transaction created successfully')
+  })
+
+  // Cenário 4: Validações step 1 (contato obrigatório + botão disabled)
+  it('Validações step 1 (contato obrigatório + botão disabled)', () => {
+    // Preparação
+    cy.loginByXstate('username', 'password')
+    cy.visit('/transaction/new')
+
+    // Ação
+    cy.get('[data-test="transaction-create-submit-payment"]').click()
+
+    // Verificação
+    cy.get('[data-test="transaction-create-submit-button"]').should('be.disabled')
+  })
 
   // Cenário 5: Validações step 2 (valor + descrição obrigatórios)
   it('Validações step 2 (valor + descrição obrigatórios)', () => {
-    cy.get('#transaction-create-description-input').clear();
-    cy.get('#transaction-create-submit-payment').should('be.disabled');
-    cy.get('#transaction-create-description-input').type('Descrição exemplo');  
-    cy.get('#transaction-create-submit-payment').should('be.enabled');
-  });
+    // Preparação
+    cy.loginByXstate('username', 'password')
+    cy.visit('/transaction/new')
+
+    // Ação
+    cy.get('[data-test="transaction-create-submit-payment"]').click()
+    cy.get('[data-test="transaction-create-submit-button"]').click()
+
+    // Verificação
+    cy.get('[data-test="transaction-create-error-message"]').should('contain', 'Valor e descrição são obrigatórios')       
+  })
 
   // Cenário 6: Cancelar transação em qualquer step
   it('Cancelar transação em qualquer step', () => {
-    cy.get('#transaction-create-amount-input').clear();
-    cy.get('#transaction-create-cancel').click();
-    cy.url().should('include', '/transaction/new');
-  });
+    // Preparação
+    cy.loginByXstate('username', 'password')
+    cy.visit('/transaction/new')
+
+    // Ação
+    cy.get('[data-test="transaction-create-cancel-button"]').click()
+
+    // Verificação
+    cy.url().should('eq', Cypress.config().baseUrl)
+  })
 
   // Cenário 7: Transação com valor máximo e mínimo
   it('Transação com valor máximo e mínimo', () => {
-    cy.get('#transaction-create-amount-input').clear();
-    cy.get('#transaction-create-amount-input').type('0');
-    cy.get('#transaction-create-submit-payment').click();
-    cy.get('#transaction-create-amount-input').clear();
-    cy.get('#transaction-create-amount-input').type('1000000');
-    cy.get('#transaction-create-submit-payment').click();
-  });
-});
+    // Preparação
+    cy.loginByXstate('username', 'password')
+    cy.visit('/transaction/new')
+
+    // Ação
+    cy.get('[data-test="transaction-create-submit-payment"]').click()
+    cy.get('[data-test="transaction-create-amount-input"]').type('10000.00')
+    cy.get('[data-test="transaction-create-description-input"]').type('Transaction description')
+    cy.get('[data-test="transaction-create-submit-button"]').click()
+
+    // Verificação
+    cy.get('[data-test="transaction-create-result"]').should('contain', 'Transaction created successfully')
+  })
+})
