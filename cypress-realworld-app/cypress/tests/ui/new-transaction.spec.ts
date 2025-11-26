@@ -1,182 +1,42 @@
-import cypress from 'cypress';
-
-describe('Nova Transação', () => {
+describe('Criar Transação', () => {
   beforeEach(() => {
-    cy.visit('/transaction/new');
-  });
+    // configurar o estado inicial do teste
+  })
 
-  it('Deve criar uma nova transação com sucesso', () => {
-    // Criando uma nova transação com montante válido e destino válido
-    const transaction = {
-      amount: 100.00,
-      source: '1234567890',
-      description: 'Pagamento de teste',
-      receiverId: '9999999999',
-      status: 'pending'
-    }
+  it('Testar se a página de criação de transação está disponível', () => {
+    cy.visit('/transaction/new')
+    cy.title().should('eq', 'Criar Transação')
+  })
 
-    // Realizando a requisição para criar a transação
-    cy.request({
-      method: 'POST',
-      url: '/transactions',
-      body: transaction
-    }).then((response) => {
-      // Verificando se a transação foi criada com sucesso
-      expect(response.status).to.equal(201)
-      expect(response.body).to.have.property('id')
+  it('Testar se os campos de entrada estão disponíveis', () => {
+    cy.get('[data-test="transaction-create-amount-input"]').should('be.visible')
+    cy.get('[data-test="transaction-create-description-input"]').should('be.visible')
+  })
+
+  it('Testar se é possível criar uma transação com sucesso', () => {
+    cy.get('[data-test="transaction-create-amount-input"]').type('10.00')
+    cy.get('[data-test="transaction-create-description-input"]').type('Descrição da transação')
+    cy.get('[data-test="transaction-create-submit"]').click()
+    cy.wait('@transactionCreated').then((xhr) => {
+      expect(xhr.response.body.transactionId).to.be.not.null
     })
   })
 
-  it('Deve criar uma nova transação com erro se o montante for inválido', () => {
-    // Criando uma nova transação com montante inválido e destino válido
-    const transaction = {
-      amount: 'abc123',
-      source: '1234567890',
-      description: 'Pagamento de teste',
-      receiverId: '9999999999',
-      status: 'pending'
-    }
+  it('Testar se é possível criar uma transação com erro', () => {
+    cy.get('[data-test="transaction-create-amount-input"]').type('')
+    cy.get('[data-test="transaction-create-description-input"]').type('Descrição da transação')
+    cy.get('[data-test="transaction-create-submit"]').click()
+    cy.get('[data-test="transaction-create-error-message"]').should('contain', 'Erro ao criar transação')
+  })
 
-    // Realizando a requisição para criar a transação
-    cy.request({
-      method: 'POST',
-      url: '/transactions',
-      body: transaction
-    }).then((response) => {
-      // Verificando se a transação foi criada com erro
-      expect(response.status).to.equal(400)
-      expect(response.body).to.have.property('error')
+  it('Testar se é possível cancelar a criação de uma transação', () => {
+    cy.get('[data-test="transaction-create-cancel"]').click()
+    cy.wait('@transactionCancelled').then((xhr) => {
+      expect(xhr.response.body.transactionId).to.be.null
     })
   })
 
-  it('Deve criar uma nova transação com erro se o destino for inválido', () => {
-    // Criando uma nova transação com montante válido e destino inválido
-    const transaction = {
-      amount: 100.00,
-      source: '1234567890',
-      description: 'Pagamento de teste',
-      receiverId: 'abc123',
-      status: 'pending'
-    }
-
-    // Realizando a requisição para criar a transação
-    cy.request({
-      method: 'POST',
-      url: '/transactions',
-      body: transaction
-    }).then((response) => {
-      // Verificando se a transação foi criada com erro
-      expect(response.status).to.equal(400)
-      expect(response.body).to.have.property('error')
-    })
-  })
-
-  it('Deve criar uma transação com sucesso após a criação de uma nova transação', () => {
-    // Criando uma nova transação com montante válido e destino válido
-    const transaction1 = {
-      amount: 100.00,
-      source: '1234567890',
-      description: 'Pagamento de teste',
-      receiverId: '9999999999',
-      status: 'pending'
-    }
-
-    // Realizando a requisição para criar a primeira transação
-    cy.request({
-      method: 'POST',
-      url: '/transactions',
-      body: transaction1
-    }).then((response) => {
-      // Verificando se a primeira transação foi criada com sucesso
-      expect(response.status).to.equal(201)
-      expect(response.body).to.have.property('id')
-
-      // Criando uma segunda transação com montante válido e destino válido
-      const transaction2 = {
-        amount: 200.00,
-        source: '9876543210',
-        description: 'Pagamento de teste',
-        receiverId: '1234567890',
-        status: 'pending'
-      }
-
-      // Realizando a requisição para criar a segunda transação
-      cy.request({
-        method: 'POST',
-        url: '/transactions',
-        body: transaction2
-      }).then((response) => {
-        // Verificando se a segunda transação foi criada com sucesso
-        expect(response.status).to.equal(201)
-        expect(response.body).to.have.property('id')
-      })
-    })
-  })
-
-  it('Deve criar uma transação com sucesso após a criação de uma transação existente', () => {
-    // Criando uma transação existente com montante válido e destino válido
-    const transaction = {
-      amount: 100.00,
-      source: '1234567890',
-      description: 'Pagamento de teste',
-      receiverId: '9999999999',
-      status: 'pending'
-    }
-
-    // Realizando a requisição para criar a transação existente
-    cy.request({
-      method: 'POST',
-      url: '/transactions',
-      body: transaction
-    }).then((response) => {
-      // Verificando se a transação existente foi criada com sucesso
-      expect(response.status).to.equal(201)
-      expect(response.body).to.have.property('id')
-
-      // Criando uma nova transação com montante válido e destino válido
-      const transaction2 = {
-        amount: 200.00,
-        source: '9876543210',
-        description: 'Pagamento de teste',
-        receiverId: '1234567890',
-        status: 'pending'
-      }
-
-      // Realizando a requisição para criar a nova transação
-      cy.request({
-        method: 'POST',
-        url: '/transactions',
-        body: transaction2
-      }).then((response) => {
-        // Verificando se a nova transação foi criada com sucesso
-        expect(response.status).to.equal(201)
-        expect(response.body).to.have.property('id')
-      })
-    })
-  })
-
-  it('Deve criar uma transação com sucesso quando o usuário está conectado', () => {
-    // Conectando o usuário
-    cy.loginByApi('username', 'password')
-
-    // Criando uma transação com montante válido e destino válido
-    const transaction = {
-      amount: 100.00,
-      source: '1234567890',
-      description: 'Pagamento de teste',
-      receiverId: '9999999999',
-      status: 'pending'
-    }
-
-    // Realizando a requisição para criar a transação
-    cy.request({
-      method: 'POST',
-      url: '/transactions',
-      body: transaction
-    }).then((response) => {
-      // Verificando se a transação foi criada com sucesso
-      expect(response.status).to.equal(201)
-      expect(response.body).to.have.property('id')
-    })
+  it('Testar se a transação criada está sendo exibida na lista de transações', () => {
+    cy.get('[data-test="transaction-list"]').should('contain', 'Descrição da transação')
   })
 })

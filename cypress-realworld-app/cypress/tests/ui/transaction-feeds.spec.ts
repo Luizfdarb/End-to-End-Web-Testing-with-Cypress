@@ -1,78 +1,49 @@
-import 'cypress';
-import 'react';
+import { getPaginatedItems } from '../../utils/transactionUtils';
+import { TransactionResponseItem, TransactionPagination } from '../../models';
 
-// Tipos e constantes
-const senderAccountId = '1';
-const receiverAccountId = '2';
-const transferAmount = '500';
-const requestAmount = '500';
-
-describe('Testa a transação de pagamentos', () => {
+describe('Transações', () => {
   beforeEach(() => {
-    // beforeEach para criar uma nova conta antes de cada teste
-    cy.request('POST', 'http://localhost:3003/api/accounts', {
-      balance: 1000,
-      ownerId: '1',
-    });
+    // Acessa a página de transações
+    cy.visit('/');
   });
 
-  it('Testa se a transação é efetuada corretamente', () => {
-    // Fazer a transação de pagamento
-    cy.request('POST', `http://localhost:3003/api/transactions`, {
-      id: 'tx-1',
-      source: 'acc-1',
-      amount: transferAmount,
-      description: 'Pagamento de conta',
-      receiverId: receiverAccountId,
-      senderId: senderAccountId,
-      privacyLevel: 'public',
-    }).then((response) => {
-      const transactionId = response.body.id;
-
-      // Verificar se o valor da transação foi atualizado corretamente
-      cy.request('GET', `http://localhost:3003/api/accounts/${senderAccountId}`).then((accountResponse) => {
-        expect(accountResponse.body.balance).to.equal('500');
-      });
-
-      // Verificar se a conta do destinatário foi atualizada corretamente
-      cy.request('GET', `http://localhost:3003/api/accounts/${receiverAccountId}`).then((accountResponse) => {
-        expect(accountResponse.body.balance).to.equal('500');
-      });
-    });
-  });
-});
-
-describe('Testa a transação de solicitação de dinheiro', () => {
-  beforeEach(() => {
-    // beforeEach para criar uma nova conta antes de cada teste
-    cy.request('POST', 'http://localhost:3003/api/accounts', {
-      balance: 1000,
-      ownerId: '1',
-    });
+  it('Carrega a lista de transações', () => {
+    // Verifica se a lista de transações está visível
+    cy.get('[data-test="transaction-list"]').should('be.visible');
+    // Verifica se a lista contém as transações esperadas
+    cy.get('[data-test="transaction-item"]').should('have.length', 10);
   });
 
-  it('Testa se a solicitação de dinheiro é efetuada corretamente', () => {
-    // Fazer a solicitação de dinheiro
-    cy.request('POST', `http://localhost:3003/api/requests`, {
-      id: 'req-1',
-      source: 'acc-1',
-      amount: requestAmount,
-      description: 'Solicitação de dinheiro',
-      receiverId: receiverAccountId,
-      senderId: senderAccountId,
-      privacyLevel: 'public',
-    }).then((response) => {
-      const requestId = response.body.id;
+  it('Filtra transações por data', () => {
+    // Acessa o filtro de data
+    cy.get('[data-test="transaction-list-filter-date-range-button"]').click();
+    // Seleciona uma data específica
+    cy.get('[data-test="filter-date-range"]').within(() => {
+      cy.get('input').type('2022-01-01');
+    });
+    // Verifica se as transações são filtradas corretamente
+    cy.get('[data-test="transaction-item"]').should('have.length', 5);
+  });
 
-      // Verificar se o valor da solicitação foi atualizado corretamente
-      cy.request('GET', `http://localhost:3003/api/accounts/${senderAccountId}`).then((accountResponse) => {
-        expect(accountResponse.body.balance).to.equal('500');
-      });
+  it('Filtra transações por valor', () => {
+    // Acessa o filtro de valor
+    cy.get('[data-test="transaction-list-filter-amount-range-button"]').click();
+    // Seleciona um valor específico
+    cy.get('[data-test="filter-amount-range"]').within(() => {
+      cy.get('input').type('100');
+    });
+    // Verifica se as transações são filtradas corretamente
+    cy.get('[data-test="transaction-item"]').should('have.length', 3);
+  });
 
-      // Verificar se a conta do solicitante foi atualizada corretamente
-      cy.request('GET', `http://localhost:3003/api/accounts/${receiverAccountId}`).then((accountResponse) => {
-        expect(accountResponse.body.balance).to.equal('500');
-      });
+  it('Paginação das transações', () => {
+    // Acessa a página de transações
+    cy.get('[data-test="transaction-list"]').within(() => {
+      // Verifica se a páginação está visível
+      cy.get('[data-test="transaction-list-pagination"]').should('be.visible');
+      // Verifica se a páginação funciona corretamente
+      cy.get('[data-test="transaction-list-pagination-next"]').click();
+      cy.get('[data-test="transaction-item"]').should('have.length', 10);
     });
   });
 });
