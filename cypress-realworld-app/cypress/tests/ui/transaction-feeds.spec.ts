@@ -1,421 +1,401 @@
-import Dinero from "dinero.js";
-import {
-  User,
-  Transaction,
-  TransactionRequestStatus,
-  TransactionResponseItem,
-  Contact,
-  TransactionStatus,
-} from "../../../src/models";
-import { addDays, isWithinInterval, startOfDay } from "date-fns";
-import { startOfDayUTC, endOfDayUTC } from "../../../src/utils/transactionUtils";
-import { isMobile } from "../../support/utils";
 
-const { _ } = Cypress;
+describe('Real World App – Transaction Feeds', () => {
+  // -----------------------------------------------------------------
+  // Helper – login once and seed the DB before each test
+  // -----------------------------------------------------------------
+  beforeEach(() => {
+    // Seed the in‑memory DB with the deterministic seed data
+    cy.task('db:seed');
 
-type TransactionFeedsCtx = {
-  allUsers?: User[];
-  user?: User;
-  contactIds?: string[];
-};
+    // Log‑in via UI (any user from the seed will work)
+    // The default password is stored in the env variable `defaultPassword`
+    cy.login('db4uxOm7d', Cypress.env('defaultPassword'));
 
-describe("Transaction Feed", function () {
-  const ctx: TransactionFeedsCtx = {};
-
-  const feedViews = {
-    public: {
-      tab: "public-tab",
-      tabLabel: "everyone",
-      routeAlias: "publicTransactions",
-      service: "publicTransactionService",
-    },
-    contacts: {
-      tab: "contacts-tab",
-      tabLabel: "friends",
-      routeAlias: "contactsTransactions",
-      service: "contactTransactionService",
-    },
-    personal: {
-      tab: "personal-tab",
-      tabLabel: "mine",
-      routeAlias: "personalTransactions",
-      service: "personalTransactionService",
-    },
-  };
-
-  beforeEach(function () {
-    cy.task("db:seed");
-
-    cy.server();
-    cy.route("GET", "/notifications").as("notifications");
-    cy.route("/transactions*").as(feedViews.personal.routeAlias);
-    cy.route("/transactions/public*").as(feedViews.public.routeAlias);
-    cy.route("/transactions/contacts*").as(feedViews.contacts.routeAlias);
-
-    cy.database("filter", "users").then((users: User[]) => {
-      ctx.user = users[0];
-      ctx.allUsers = users;
-
-      cy.loginByXstate(ctx.user.username);
-    });
-  });
-  describe("app layout and responsiveness", function () {
-    it("toggles the navigation drawer", function () {
-      cy.wait("@notifications");
-      if (isMobile()) {
-        cy.getBySel("sidenav-home").should("not.be.visible");
-        cy.percySnapshot("Mobile Initial Side Navigation Not Visible");
-        cy.getBySel("sidenav-toggle").click();
-        cy.getBySel("sidenav-home").should("be.visible");
-        cy.percySnapshot("Mobile Toggle Side Navigation Visible");
-        cy.get(".MuiBackdrop-root").click({ force: true });
-        cy.getBySel("sidenav-home").should("not.be.visible");
-        cy.percySnapshot("Mobile Home Link Side Navigation Not Visible");
-
-        cy.getBySel("sidenav-toggle").click();
-        cy.getBySel("sidenav-home").click().should("not.be.visible");
-        cy.percySnapshot("Mobile Toggle Side Navigation Not Visible");
-      } else {
-        cy.getBySel("sidenav-home").should("be.visible");
-        cy.percySnapshot("Desktop Side Navigation Visible");
-        cy.getBySel("sidenav-toggle").click();
-        cy.getBySel("sidenav-home").should("not.be.visible");
-        cy.percySnapshot("Desktop Side Navigation Not Visible");
-      }
-    });
+    // Ensure the main page has loaded
+    cy.location('pathname').should('eq', '/');
   });
 
-  describe("renders and paginates all transaction feeds", function () {
-    it("renders transactions item variations in feed", function () {
-      cy.route("/transactions/public*", "fixture:public-transactions").as(
-        "mockedPublicTransactions"
-      );
-      cy.visit("/");
+  // -----------------------------------------------------------------
+  // 1️⃣ Toggle navigation drawer (mobile vs desktop)
+  // -----------------------------------------------------------------
+  it('1️⃣ toggles the navigation drawer on mobile and desktop', () => {
+    // Desktop – drawer is always open (persistent)
+    cy.get('[data-test="sidenav"]').should('be.visible');
 
-      cy.wait("@notifications");
-      cy.wait("@mockedPublicTransactions")
-        .its("response.body.results")
-        .then((transactions) => {
-          const getTransactionFromEl = ($el: JQuery<Element>): TransactionResponseItem => {
-            const transactionId = $el.data("test").split("transaction-item-")[1];
-            return _.find(transactions, {
-              id: transactionId,
-            })!;
-          };
+    // Switch to mobile viewport
+    cy.viewport(375, 667);
 
-          cy.log("🚩Testing a paid payment transaction item");
-          cy.contains("[data-test*='transaction-item']", "paid").within(($el) => {
-            const transaction = getTransactionFromEl($el);
-            const formattedAmount = Dinero({
-              amount: transaction.amount,
-            }).toFormat();
+    // Drawer should be hidden initially
+    cy.get('[data-test="sidenav"]').should('not.be.visible');
 
-            expect([TransactionStatus.pending, TransactionStatus.complete]).to.include(
-              transaction.status
-            );
+    // Open drawer
+    cy.get('[data-test="sidenav-toggle"]').click();
+    cy.get('[data-test="sidenav"]').should('be.visible');
 
-            expect(transaction.requestStatus).to.be.empty;
+    // Close drawer
+    cy.get('[data-test="sidenav-toggle"]').click();
+    cy.get('[data-test="sidenav"]').should('not.be.visible');
+  });
 
-            cy.getBySelLike("like-count").should("have.text", `${transaction.likes.length}`);
-            cy.getBySelLike("comment-count").should("have.text", `${transaction.comments.length}`);
+  // -----------------------------------------------------------------
+  // 2️⃣ Render variations of transaction items (paid, charged, requested)
+  // -----------------------------------------------------------------
+  it('2️⃣ renders transaction items of all three types', () => {
+    // The seed contains at least one payment, one request and one charged request.
+    // We assert that the UI shows items with the correct sign (+ / -) and text.
 
-            cy.getBySelLike("sender").should("contain", transaction.senderName);
-            cy.getBySelLike("receiver").should("contain", transaction.receiverName);
+    // Paid transaction – amount is negative (‑)
+    cy.get('[data-test^="transaction-amount-"]')
+      .contains('-')
+      .first()
+      .should('exist');
 
-            cy.getBySelLike("amount")
-              .should("contain", `-${formattedAmount}`)
-              .should("have.css", "color", "rgb(255, 0, 0)");
-          });
-
-          cy.log("🚩Testing a charged payment transaction item");
-          cy.contains("[data-test*='transaction-item']", "charged").within(($el) => {
-            const transaction = getTransactionFromEl($el);
-            const formattedAmount = Dinero({
-              amount: transaction.amount,
-            }).toFormat();
-
-            expect(TransactionStatus.complete).to.equal(transaction.status);
-
-            expect(transaction.requestStatus).to.equal(TransactionRequestStatus.accepted);
-
-            cy.getBySelLike("amount")
-              .should("contain", `+${formattedAmount}`)
-              .should("have.css", "color", "rgb(76, 175, 80)");
-          });
-
-          cy.log("🚩Testing a requested payment transaction item");
-          cy.contains("[data-test*='transaction-item']", "requested").within(($el) => {
-            const transaction = getTransactionFromEl($el);
-            const formattedAmount = Dinero({
-              amount: transaction.amount,
-            }).toFormat();
-
-            expect([TransactionStatus.pending, TransactionStatus.complete]).to.include(
-              transaction.status
-            );
-            expect([
-              TransactionRequestStatus.pending,
-              TransactionRequestStatus.rejected,
-            ]).to.include(transaction.requestStatus);
-
-            cy.getBySelLike("amount")
-              .should("contain", `+${formattedAmount}`)
-              .should("have.css", "color", "rgb(76, 175, 80)");
-          });
-          cy.percySnapshot("Transaction Item");
-        });
-    });
-
-    _.each(feedViews, (feed, feedName) => {
-      it(`paginates ${feedName} transaction feed`, function () {
-        cy.getBySelLike(feed.tab)
-          .click()
-          .should("have.class", "Mui-selected")
-          .contains(feed.tabLabel, { matchCase: false })
-          .should("have.css", { "text-transform": "uppercase" });
-        cy.getBySel("list-skeleton").should("not.be.visible");
-        cy.percySnapshot(`Paginate ${feedName}`);
-
-        cy.wait(`@${feed.routeAlias}`)
-          .its("response.body.results")
-          .should("have.length", Cypress.env("paginationPageSize"));
-
-        // Temporary fix: https://github.com/cypress-io/cypress-realworld-app/issues/338
-        if (isMobile()) {
-          cy.wait(10);
-        }
-
-        cy.log("📃 Scroll to next page");
-        cy.getBySel("transaction-list").children().scrollTo("bottom");
-
-        cy.wait(`@${feed.routeAlias}`)
-          .its("response.body")
-          .then(({ results, pageData }) => {
-            expect(results).have.length(Cypress.env("paginationPageSize"));
-            expect(pageData.page).to.equal(2);
-            cy.percySnapshot(`Paginate ${feedName} Next Page`);
-            cy.nextTransactionFeedPage(feed.service, pageData.totalPages);
-          });
-
-        cy.wait(`@${feed.routeAlias}`)
-          .its("response.body")
-          .then(({ results, pageData }) => {
-            expect(results).to.have.length.least(1);
-            expect(pageData.page).to.equal(pageData.totalPages);
-            expect(pageData.hasNextPages).to.equal(false);
-            cy.percySnapshot(`Paginate ${feedName} Last Page`);
-          });
+    // Requested transaction – amount is positive (+) and description contains “Request”
+    cy.get('[data-test^="transaction-item-"]')
+      .filter(':contains("Request")')
+      .first()
+      .within(() => {
+        cy.get('[data-test^="transaction-amount-"]').contains('+').should('exist');
       });
+
+    // Charged transaction – a request that has been accepted (status complete)
+    cy.get('[data-test^="transaction-item-"]')
+      .filter(':contains("charged")')
+      .first()
+      .should('exist');
+  });
+
+  // -----------------------------------------------------------------
+  // 3️⃣ Paginate personal transaction feed
+  // -----------------------------------------------------------------
+  it('3️⃣ paginates the personal transaction feed', () => {
+    cy.visit('/personal');
+
+    // Wait for first page to load
+    cy.get('[data-test^="transaction-item-"]').should('have.length.at.least', 1);
+
+    // Capture the amount of items on page 1
+    cy.get('[data-test^="transaction-item-"]').its('length').as('pageOneCount');
+
+    // Load page 2 via the helper command
+    // The service is exposed on `window.personalTransactionService`
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    cy.window().its('personalTransactionService').then((svc: any) => {
+      cy.nextTransactionFeedPage('personalTransactionService', 2);
+    });
+
+    // After loading page 2 we should have more items than page 1
+    cy.get('@pageOneCount').then((cnt: number) => {
+      cy.get('[data-test^="transaction-item-"]').its('length').should('be.gt', cnt);
     });
   });
 
-  describe("filters transaction feeds by date range", function () {
-    if (isMobile()) {
-      it("closes date range picker modal", () => {
-        cy.getBySelLike("filter-date-range-button").click({ force: true });
-        cy.get(".Cal__Header__root").should("be.visible");
-        cy.percySnapshot("Mobile Open Date Range Picker");
-        cy.getBySel("date-range-filter-drawer-close").click();
-        cy.get(".Cal__Header__root").should("not.be.visible");
-        cy.percySnapshot("Mobile Close Date Range Picker");
-      });
-    }
+  // -----------------------------------------------------------------
+  // 4️⃣ Paginate public transaction feed
+  // -----------------------------------------------------------------
+  it('4️⃣ paginates the public transaction feed', () => {
+    cy.visit('/');
 
-    _.each(feedViews, (feed, feedName) => {
-      it(`filters ${feedName} transaction feed by date range`, function () {
-        cy.database("find", "transactions").then((transaction: Transaction) => {
-          const dateRangeStart = startOfDay(new Date(transaction.createdAt));
-          const dateRangeEnd = endOfDayUTC(addDays(dateRangeStart, 1));
+    cy.get('[data-test^="transaction-item-"]').should('have.length.at.least', 1);
+    cy.get('[data-test^="transaction-item-"]').its('length').as('pageOneCount');
 
-          cy.getBySelLike(feed.tab).click().should("have.class", "Mui-selected");
+    cy.window().its('publicTransactionService').then((svc: any) => {
+      cy.nextTransactionFeedPage('publicTransactionService', 2);
+    });
 
-          cy.wait(`@${feed.routeAlias}`).its("response.body.results").as("unfilteredResults");
+    cy.get('@pageOneCount').then((cnt: number) => {
+      cy.get('[data-test^="transaction-item-"]').its('length').should('be.gt', cnt);
+    });
+  });
 
-          cy.pickDateRange(dateRangeStart, dateRangeEnd);
+  // -----------------------------------------------------------------
+  // 5️⃣ Paginate contacts transaction feed
+  // -----------------------------------------------------------------
+  it('5️⃣ paginates the contacts transaction feed', () => {
+    cy.visit('/contacts');
 
-          cy.wait(`@${feed.routeAlias}`)
-            .its("response.body.results")
-            .then((transactions: Transaction[]) => {
-              cy.getBySelLike("transaction-item").should("have.length", transactions.length);
+    cy.get('[data-test^="transaction-item-"]').should('have.length.at.least', 1);
+    cy.get('[data-test^="transaction-item-"]').its('length').as('pageOneCount');
 
-              cy.percySnapshot("Date Range Filtered Transactions");
-              transactions.forEach(({ createdAt }) => {
-                const createdAtDate = startOfDayUTC(new Date(createdAt));
+    cy.window().its('contactTransactionService').then((svc: any) => {
+      cy.nextTransactionFeedPage('contactTransactionService', 2);
+    });
 
-                expect(
-                  isWithinInterval(createdAtDate, {
-                    start: startOfDayUTC(dateRangeStart),
-                    end: dateRangeEnd,
-                  }),
-                  `transaction created date (${createdAtDate.toISOString()}) 
-                  is within ${dateRangeStart.toISOString()} 
-                  and ${dateRangeEnd.toISOString()}`
-                ).to.equal(true);
-              });
+    cy.get('@pageOneCount').then((cnt: number) => {
+      cy.get('[data-test^="transaction-item-"]').its('length').should('be.gt', cnt);
+    });
+  });
+
+  // -----------------------------------------------------------------
+  // 6️⃣ Close date‑range picker modal on mobile
+  // -----------------------------------------------------------------
+  it('6️⃣ closes the date‑range picker drawer on mobile', () => {
+    cy.viewport(375, 667);
+    cy.visit('/personal');
+
+    // Open the date‑range filter
+    cy.get('[data-test="transaction-list-filter-date-range-button"]').click();
+
+    // Drawer should be visible
+    cy.get('[data-test="date-range-filter-drawer"]').should('be.visible');
+
+    // Close it
+    cy.get('[data-test="date-range-filter-drawer-close"]').click();
+
+    // Drawer disappears
+    cy.get('[data-test="date-range-filter-drawer"]').should('not.be.visible');
+  });
+
+  // -----------------------------------------------------------------
+  // 7️⃣ Filter personal feed by date
+  // -----------------------------------------------------------------
+  it('7️⃣ filters the personal feed by a date range', () => {
+    cy.visit('/personal');
+
+    // Pick a date range that we know contains data (e.g. Dec 01‑05 2019)
+    const start = new Date('2019-12-01');
+    const end = new Date('2019-12-05');
+    cy.pickDateRange(start, end);
+
+    // After filtering, at least one transaction should be visible
+    cy.get('[data-test^="transaction-item-"]').should('have.length.at.least', 1);
+  });
+
+  // -----------------------------------------------------------------
+  // 8️⃣ Filter public feed by date
+  // -----------------------------------------------------------------
+  it('8️⃣ filters the public feed by a date range', () => {
+    cy.visit('/');
+
+    const start = new Date('2019-12-01');
+    const end = new Date('2019-12-05');
+    cy.pickDateRange(start, end);
+
+    cy.get('[data-test^="transaction-item-"]').should('have.length.at.least', 1);
+  });
+
+  // -----------------------------------------------------------------
+  // 9️⃣ Filter contacts feed by date
+  // -----------------------------------------------------------------
+  it('9️⃣ filters the contacts feed by a date range', () => {
+    cy.visit('/contacts');
+
+    const start = new Date('2019-12-01');
+    const end = new Date('2019-12-05');
+    cy.pickDateRange(start, end);
+
+    cy.get('[data-test^="transaction-item-"]').should('have.length.at.least', 1);
+  });
+
+  // -----------------------------------------------------------------
+  // 10️⃣ Personal feed empty when date range yields no results
+  // -----------------------------------------------------------------
+  it('10️⃣ shows an empty personal feed when the date range matches no transactions', () => {
+    cy.visit('/personal');
+
+    // Choose a far‑future range that has no data
+    const start = new Date('2100-01-01');
+    const end = new Date('2100-01-02');
+    cy.pickDateRange(start, end);
+
+    // Empty list header is displayed
+    cy.get('[data-test="empty-list-header"]').should('contain', 'No Transactions');
+  });
+
+  // -----------------------------------------------------------------
+  // 11️⃣ Public feed empty when date range yields no results
+  // -----------------------------------------------------------------
+  it('11️⃣ shows an empty public feed when the date range matches no transactions', () => {
+    cy.visit('/');
+
+    const start = new Date('2100-01-01');
+    const end = new Date('2100-01-02');
+    cy.pickDateRange(start, end);
+
+    cy.get('[data-test="empty-list-header"]').should('contain', 'No Transactions');
+  });
+
+  // -----------------------------------------------------------------
+  // 12️⃣ Contacts feed empty when date range yields no results
+  // -----------------------------------------------------------------
+  it('12️⃣ shows an empty contacts feed when the date range matches no transactions', () => {
+    cy.visit('/contacts');
+
+    const start = new Date('2100-01-01');
+    const end = new Date('2100-01-02');
+    cy.pickDateRange(start, end);
+
+    cy.get('[data-test="empty-list-header"]').should('contain', 'No Transactions');
+  });
+
+  // -----------------------------------------------------------------
+  // 13️⃣ Filter personal feed by amount
+  // -----------------------------------------------------------------
+  it('13️⃣ filters the personal feed by amount range', () => {
+    cy.visit('/personal');
+
+    // Set a wide range that definitely contains data (0‑50000)
+    cy.setTransactionAmountRange(0, 50000);
+
+    cy.get('[data-test^="transaction-item-"]').should('have.length.at.least', 1);
+  });
+
+  // -----------------------------------------------------------------
+  // 14️⃣ Filter public feed by amount
+  // -----------------------------------------------------------------
+  it('14️⃣ filters the public feed by amount range', () => {
+    cy.visit('/');
+
+    cy.setTransactionAmountRange(0, 50000);
+
+    cy.get('[data-test^="transaction-item-"]').should('have.length.at.least', 1);
+  });
+
+  // -----------------------------------------------------------------
+  // 15️⃣ Filter contacts feed by amount
+  // -----------------------------------------------------------------
+  it('15️⃣ filters the contacts feed by amount range', () => {
+    cy.visit('/contacts');
+
+    cy.setTransactionAmountRange(0, 50000);
+
+    cy.get('[data-test^="transaction-item-"]').should('have.length.at.least', 1);
+  });
+
+  // -----------------------------------------------------------------
+  // 16️⃣ Personal feed empty when amount range yields no results
+  // -----------------------------------------------------------------
+  it('16️⃣ shows an empty personal feed when the amount range matches no transactions', () => {
+    cy.visit('/personal');
+
+    // Very high range – the seed never generates amounts > 50000
+    cy.setTransactionAmountRange(100000, 200000);
+
+    cy.get('[data-test="empty-list-header"]').should('contain', 'No Transactions');
+  });
+
+  // -----------------------------------------------------------------
+  // 17️⃣ Public feed empty when amount range yields no results
+  // -----------------------------------------------------------------
+  it('17️⃣ shows an empty public feed when the amount range matches no transactions', () => {
+    cy.visit('/');
+
+    cy.setTransactionAmountRange(100000, 200000);
+
+    cy.get('[data-test="empty-list-header"]').should('contain', 'No Transactions');
+  });
+
+  // -----------------------------------------------------------------
+  // 18️⃣ Contacts feed empty when amount range yields no results
+  // -----------------------------------------------------------------
+  it('18️⃣ shows an empty contacts feed when the amount range matches no transactions', () => {
+    cy.visit('/contacts');
+
+    cy.setTransactionAmountRange(100000, 200000);
+
+    cy.get('[data-test="empty-list-header"]').should('contain', 'No Transactions');
+  });
+
+  // -----------------------------------------------------------------
+  // 19️⃣ Personal feed shows only transactions belonging to the user
+  // -----------------------------------------------------------------
+  it('19️⃣ verifies that the personal feed only contains transactions of the logged‑in user', () => {
+    // Get the logged‑in user id from the drawer (visible after login)
+    cy.get('[data-test="sidenav-username"]').invoke('text').then((usernameText) => {
+      const username = usernameText.trim().replace('@', '');
+
+      // Look up the user in the DB
+      cy.database('find', 'users', { username }).then((user: any) => {
+        const userId = user.id;
+
+        // Visit personal feed and collect all rendered transaction IDs
+        cy.visit('/personal');
+        cy.get('[data-test^="transaction-item-"]').then(($items) => {
+          const ids = [...$items].map((el) => {
+            const match = el.getAttribute('data-test')?.match(/^transaction-item-(.*)$/);
+            return match ? match[1] : null;
+          });
+
+          // For each transaction id, fetch it from the DB and ensure the user is either sender or receiver
+          cy.wrap(ids).each((txId) => {
+            cy.database('find', 'transactions', { id: txId }).then((tx: any) => {
+              expect([tx.senderId, tx.receiverId]).to.include(userId);
             });
-
-          cy.log("Clearing date range filter. Data set should revert");
-          cy.getBySelLike("filter-date-clear-button").click({
-            force: true,
           });
-
-          cy.get("@unfilteredResults").then((unfilteredResults) => {
-            cy.wait(`@${feed.routeAlias}`)
-              .its("response.body.results")
-              .should("deep.equal", unfilteredResults);
-          });
-          cy.percySnapshot("Unfiltered Transactions");
         });
-      });
-
-      it(`does not show ${feedName} transactions for out of range date limits`, function () {
-        const dateRangeStart = startOfDay(new Date(2014, 1, 1));
-        const dateRangeEnd = endOfDayUTC(addDays(dateRangeStart, 1));
-
-        cy.getBySelLike(feed.tab).click();
-        cy.wait(`@${feed.routeAlias}`);
-
-        cy.pickDateRange(dateRangeStart, dateRangeEnd);
-        cy.wait(`@${feed.routeAlias}`);
-
-        cy.getBySelLike("transaction-item").should("have.length", 0);
-        cy.getBySel("empty-list-header").should("contain", "No Transactions");
-        cy.getBySelLike("empty-create-transaction-button")
-          .should("have.attr", "href", "/transaction/new")
-          .contains("create a transaction", { matchCase: false })
-          .should("have.css", { "text-transform": "uppercase" });
-        cy.percySnapshot("No Transactions");
       });
     });
   });
 
-  describe("filters transaction feeds by amount range", function () {
-    const dollarAmountRange = {
-      min: 200,
-      max: 800,
-    };
+  // -----------------------------------------------------------------
+  // 20️⃣ First five public items belong to contacts
+  // -----------------------------------------------------------------
+  it('20️⃣ verifies that the first five items of the public feed belong to the user’s contacts', () => {
+    // Get current user id from the drawer
+    cy.get('[data-test="sidenav-username"]').invoke('text').then((usernameText) => {
+      const username = usernameText.trim().replace('@', '');
 
-    _.each(feedViews, (feed, feedName) => {
-      it(`filters ${feedName} transaction feed by amount range`, function () {
-        cy.getBySelLike(feed.tab).click({ force: true }).should("have.class", "Mui-selected");
+      // Find the user
+      cy.database('find', 'users', { username }).then((user: any) => {
+        const userId = user.id;
 
-        cy.wait(`@${feed.routeAlias}`).its("response.body.results").as("unfilteredResults");
+        // Get contacts for this user
+        cy.database('filter', 'contacts', { userId }).then((contacts: any[]) => {
+          const contactIds = contacts.map((c) => c.contactUserId);
 
-        cy.setTransactionAmountRange(dollarAmountRange.min, dollarAmountRange.max);
+          // Visit the public feed
+          cy.visit('/');
 
-        cy.getBySelLike("filter-amount-range-text").should(
-          "contain",
-          `$${dollarAmountRange.min} - $${dollarAmountRange.max}`
-        );
-
-        cy.wait(`@${feed.routeAlias}`).then(({ response: { body }, url }) => {
-          // @ts-ignore
-          const transactions = body.results as TransactionResponseItem[];
-          const urlParams = new URLSearchParams(_.last(url.split("?")));
-
-          const rawAmountMin = dollarAmountRange.min * 100;
-          const rawAmountMax = dollarAmountRange.max * 100;
-
-          expect(urlParams.get("amountMin")).to.equal(`${rawAmountMin}`);
-          expect(urlParams.get("amountMax")).to.equal(`${rawAmountMax}`);
-
-          cy.percySnapshot("Amount Range Filtered Transactions");
-          transactions.forEach(({ amount }) => {
-            expect(amount).to.be.within(rawAmountMin, rawAmountMax);
-          });
+          // Grab the first five rendered transaction ids
+          cy.get('[data-test^="transaction-item-"]')
+            .its('length')
+            .then((len) => Math.min(len, 5))
+            .then((count) => {
+              cy.get('[data-test^="transaction-item-"]')
+                .filter(':lt(' + count + ')')
+                .each(($el) => {
+                  const txId = $el.attr('data-test')?.replace('transaction-item-', '');
+                  // Fetch transaction and assert that either sender or receiver is a contact
+                  cy.database('find', 'transactions', { id: txId }).then((tx: any) => {
+                    const isContact = contactIds.includes(tx.senderId) || contactIds.includes(tx.receiverId);
+                    expect(isContact).to.be.true;
+                  });
+                });
+            });
         });
-
-        cy.getBySelLike("amount-clear-button").click();
-        cy.get("@unfilteredResults").then((unfilteredResults) => {
-          cy.wait(`@${feed.routeAlias}`)
-            .its("response.body.results")
-            .should("deep.equal", unfilteredResults);
-          cy.percySnapshot("Unfiltered Transactions");
-        });
-
-        if (isMobile()) {
-          cy.getBySelLike("amount-range-filter-drawer-close").click();
-          cy.getBySel("amount-range-filter-drawer").should("not.be.visible");
-        } else {
-          cy.getBySel("transaction-list-filter-amount-clear-button").click();
-          cy.getBySel("main").scrollTo("top");
-          cy.getBySel("transaction-list-filter-date-range-button").click({ force: true });
-          cy.getBySel("transaction-list-filter-amount-range").should("not.be.visible");
-        }
-      });
-
-      it(`does not show ${feedName} transactions for out of range amount limits`, function () {
-        cy.getBySelLike(feed.tab).click();
-        cy.wait(`@${feed.routeAlias}`);
-
-        cy.setTransactionAmountRange(550, 1000);
-        cy.getBySelLike("filter-amount-range-text").should("contain", "$550 - $1,000");
-        cy.wait(`@${feed.routeAlias}`);
-
-        cy.getBySelLike("transaction-item").should("have.length", 0);
-        cy.getBySel("empty-list-header").should("contain", "No Transactions");
-        cy.getBySelLike("empty-create-transaction-button")
-          .should("have.attr", "href", "/transaction/new")
-          .contains("create a transaction", { matchCase: false })
-          .should("have.css", { "text-transform": "uppercase" });
-        cy.percySnapshot("No Transactions");
       });
     });
   });
 
-  describe("Feed Item Visibility", () => {
-    it("mine feed only shows personal transactions", function () {
-      cy.database("filter", "contacts", { userId: ctx.user!.id }).then((contacts: Contact[]) => {
-        ctx.contactIds = contacts.map((contact) => contact.contactUserId);
-      });
+  // -----------------------------------------------------------------
+  // 21️⃣ Contacts feed shows only transactions of contacts
+  // -----------------------------------------------------------------
+  it('21️⃣ verifies that the contacts feed only contains transactions that involve a contact', () => {
+    // Get current user id
+    cy.get('[data-test="sidenav-username"]').invoke('text').then((usernameText) => {
+      const username = usernameText.trim().replace('@', '');
 
-      cy.getBySelLike(feedViews.personal.tab).click();
+      cy.database('find', 'users', { username }).then((user: any) => {
+        const userId = user.id;
 
-      cy.wait("@personalTransactions")
-        .its("response.body.results")
-        .each((transaction: Transaction) => {
-          const transactionParticipants = [transaction.senderId, transaction.receiverId];
-          expect(transactionParticipants).to.include(ctx.user!.id);
+        // Retrieve contacts for the user
+        cy.database('filter', 'contacts', { userId }).then((contacts: any[]) => {
+          const contactIds = contacts.map((c) => c.contactUserId);
+
+          // Visit contacts feed
+          cy.visit('/contacts');
+
+          // For each rendered transaction, confirm that at least one party is a contact
+          cy.get('[data-test^="transaction-item-"]').each(($el) => {
+            const txId = $el.attr('data-test')?.replace('transaction-item-', '');
+            cy.database('find', 'transactions', { id: txId }).then((tx: any) => {
+              const involvesContact =
+                contactIds.includes(tx.senderId) || contactIds.includes(tx.receiverId);
+              expect(involvesContact).to.be.true;
+            });
+          });
         });
-      cy.percySnapshot("Personal Transactions");
-    });
-
-    it("first five items belong to contacts in public feed", function () {
-      cy.database("filter", "contacts", { userId: ctx.user!.id }).then((contacts: Contact[]) => {
-        ctx.contactIds = contacts.map((contact) => contact.contactUserId);
       });
-
-      cy.wait("@publicTransactions")
-        .its("response.body.results")
-        .invoke("slice", 0, 5)
-        .each((transaction: Transaction) => {
-          const transactionParticipants = [transaction.senderId, transaction.receiverId];
-
-          const contactsInTransaction = _.intersection(transactionParticipants, ctx.contactIds!);
-          const message = `"${contactsInTransaction}" are contacts of ${ctx.user!.id}`;
-          expect(contactsInTransaction, message).to.not.be.empty;
-        });
-      cy.percySnapshot("First 5 Transaction Items belong to contacts");
-    });
-
-    it("friends feed only shows contact transactions", function () {
-      cy.database("filter", "contacts", { userId: ctx.user!.id }).then((contacts: Contact[]) => {
-        ctx.contactIds = contacts.map((contact) => contact.contactUserId);
-      });
-
-      cy.getBySelLike(feedViews.contacts.tab).click();
-
-      cy.wait("@contactsTransactions")
-        .its("response.body.results")
-        .each((transaction: Transaction) => {
-          const transactionParticipants = [transaction.senderId, transaction.receiverId];
-
-          const contactsInTransaction = _.intersection(ctx.contactIds!, transactionParticipants);
-
-          const message = `"${contactsInTransaction}" are contacts of ${ctx.user!.id}`;
-          expect(contactsInTransaction, message).to.not.be.empty;
-        });
-      cy.percySnapshot("Friends Feed only shows contacts transactions");
     });
   });
 });

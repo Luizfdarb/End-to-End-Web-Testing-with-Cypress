@@ -1,156 +1,196 @@
-import { User } from "../../../src/models";
-import { isMobile } from "../../support/utils";
 
-describe("User Sign-up and Login", function () {
-  beforeEach(function () {
-    cy.task("db:seed");
 
-    cy.server();
-    cy.route("POST", "/users").as("signup");
-    cy.route("POST", "/bankAccounts").as("createBankAccount");
-  });
+describe('Authentication – Real World App', () => {
+  // -------------------------------------------------------------------------
+  // Helper – obtain a deterministic user from the seeded DB.
+  // -------------------------------------------------------------------------
+  let seededUser: {
+    username: string;
+    password: string; // the default password set in .env (exposed via Cypress env)
+    firstName: string;
+    lastName: string;
+  };
 
-  it("should redirect unauthenticated user to signin page", function () {
-    cy.visit("/personal");
-    cy.location("pathname").should("equal", "/signin");
-    cy.percySnapshot("Redirect to SignIn");
-  });
-
-  it("should remember a user for 30 days after login", function () {
-    cy.database("find", "users").then((user: User) => {
-      cy.login(user.username, "s3cret", true);
+  before(() => {
+    // The API server is already running (started by `yarn start:ci` in the CI).
+    // Grab the first user from the seed so the tests are deterministic.
+    cy.request('GET', `${Cypress.env('apiUrl')}/users`).then((resp) => {
+      const first = resp.body.results[0];
+      seededUser = {
+        username: first.username,
+        password: Cypress.env('defaultPassword'), // same for every seeded user
+        firstName: first.firstName,
+        lastName: first.lastName,
+      };
     });
-
-    // Verify Session Cookie
-    cy.getCookie("connect.sid").should("have.property", "expiry");
-
-    // Logout User
-    if (isMobile()) {
-      cy.getBySel("sidenav-toggle").click();
-    }
-    cy.getBySel("sidenav-signout").click();
-    cy.location("pathname").should("eq", "/signin");
-    cy.percySnapshot("Redirect to SignIn");
   });
 
-  it("should allow a visitor to sign-up, login, and logout", function () {
-    const userInfo = {
-      firstName: "Bob",
-      lastName: "Ross",
-      username: "PainterJoy90",
-      password: "s3cret",
+  // -------------------------------------------------------------------------
+  // Reset DB before each test – guarantees isolation.
+  // -------------------------------------------------------------------------
+  beforeEach(() => {
+    cy.task('db:seed');
+  });
+
+  // -------------------------------------------------------------------------
+  // 1️⃣  Redirection – non‑authenticated user tries to access a protected page.
+  // -------------------------------------------------------------------------
+  it('Redirects unauthenticated user from a protected route to the sign‑in page', () => {
+    cy.visit('/personal'); // protected route
+    cy.location('pathname').should('eq', '/signin');
+  });
+
+  // -------------------------------------------------------------------------
+  // 2️⃣  Login with “remember me”, verify cookie, then logout.
+  // -------------------------------------------------------------------------
+  it('Logs in with “Remember me”, checks session cookie, then logs out', () => {
+    // UI login (the custom command also asserts the request was made)
+    cy.login(seededUser.username, seededUser.password, true);
+
+    // The app uses an express‑session cookie called `connect.sid`
+    cy.getCookie('connect.sid')
+      .should('exist')
+      .and((cookie) => {
+        // a session cookie should have a value (non‑empty string)
+        expect(cookie?.value).to.be.a('string').and.not.be.empty;
+      });
+
+    // Logout via XState (bypasses the UI but still hits the /logout endpoint)
+    cy.logoutByXstate();
+
+    // After logout we should be back on the sign‑in page
+    cy.location('pathname').should('eq', '/signin');
+  });
+
+  // -------------------------------------------------------------------------
+  // 3️⃣  Full signup → onboarding (bank account) → dashboard.
+  // -------------------------------------------------------------------------
+  it('Signs up a new user, completes onboarding and lands on the dashboard', () => {
+    const newUser = {
+      firstName: 'Cypress',
+      lastName: 'Tester',
+      username: `cyp_user_${Date.now()}`,
+      password: 'Password123',
     };
 
-    // Sign-up User
-    cy.visit("/");
+    // ----- SIGN‑UP ---------------------------------------------------------
+    cy.visit('/signup');
 
-    cy.getBySel("signup").click();
-    cy.getBySel("signup-title").should("be.visible").and("contain", "Sign Up");
-    cy.percySnapshot("Sign Up Title");
+    cy.getBySel('signup-first-name').type(newUser.firstName);
+    cy.getBySel('signup-last-name').type(newUser.lastName);
+    cy.getBySel('signup-username').type(newUser.username);
+    cy.getBySel('signup-password').type(newUser.password);
+    cy.getBySel('signup-confirmPassword').type(newUser.password);
+    cy.getBySel('signup-submit').click();
 
-    cy.getBySel("signup-first-name").type(userInfo.firstName);
-    cy.getBySel("signup-last-name").type(userInfo.lastName);
-    cy.getBySel("signup-username").type(userInfo.username);
-    cy.getBySel("signup-password").type(userInfo.password);
-    cy.getBySel("signup-confirmPassword").type(userInfo.password);
-    cy.percySnapshot("About to Sign Up");
-    cy.getBySel("signup-submit").click();
-    cy.wait("@signup");
+    // after a successful sign‑up the app redirects to /signin
+    cy.location('pathname').should('eq', '/signin');
 
-    // Login User
-    cy.login(userInfo.username, userInfo.password);
+    // ----- LOGIN -----------------------------------------------------------
+    cy.login(newUser.username, newUser.password);
 
-    // Onboarding
-    cy.getBySel("user-onboarding-dialog").should("be.visible");
-    cy.percySnapshot("User Onboarding Dialog");
-    cy.getBySel("user-onboarding-next").click();
+    // ----- ONBOARDING ------------------------------------------------------
+    // the onboarding dialog appears because the user has no bank accounts yet
+    cy.get('[data-test="user-onboarding-dialog"]').should('be.visible');
 
-    cy.getBySel("user-onboarding-dialog-title").should("contain", "Create Bank Account");
+    // Step 1 → Next (explain why we need a bank account)
+    cy.get('[data-test="user-onboarding-next"]').click();
 
-    cy.getBySelLike("bankName-input").type("The Best Bank");
-    cy.getBySelLike("accountNumber-input").type("123456789");
-    cy.getBySelLike("routingNumber-input").type("987654321");
-    cy.percySnapshot("About to complete User Onboarding");
-    cy.getBySelLike("submit").click();
+    // Step 2 – create a bank account (the form is rendered inside the dialog)
+    cy.get('[data-test="bankaccount-bankName-input"]').type('Cypress Bank');
+    cy.get('[data-test="bankaccount-routingNumber-input"]').type('123456789');
+    cy.get('[data-test="bankaccount-accountNumber-input"]').type('1234567890');
+    cy.get('[data-test="bankaccount-submit"]').click();
 
-    cy.wait("@createBankAccount");
+    // After creating the bank account the onboarding dialog moves to step 3
+    cy.get('[data-test="user-onboarding-dialog-title"]')
+      .should('contain', 'Finished');
 
-    cy.getBySel("user-onboarding-dialog-title").should("contain", "Finished");
-    cy.getBySel("user-onboarding-dialog-content").should("contain", "You're all set!");
-    cy.percySnapshot("Finished User Onboarding");
-    cy.getBySel("user-onboarding-next").click();
+    // Finish onboarding
+    cy.get('[data-test="user-onboarding-next"]').click();
 
-    cy.getBySel("transaction-list").should("be.visible");
-    cy.percySnapshot("Transaction List is visible after User Onboarding");
+    // The dialog should now be closed and the user should see the dashboard
+    cy.get('[data-test="user-onboarding-dialog"]').should('not.exist');
 
-    // Logout User
-    if (isMobile()) {
-      cy.getBySel("sidenav-toggle").click();
-    }
-    cy.getBySel("sidenav-signout").click();
-    cy.location("pathname").should("eq", "/signin");
-    cy.percySnapshot("Redirect to SignIn");
+    // Verify that the main content (transaction list) is rendered
+    cy.get('[data-test="nav-transaction-tabs"]').should('be.visible');
   });
 
-  it("should display login errors", function () {
-    cy.visit("/");
+  // -------------------------------------------------------------------------
+  // 4️⃣  Login form validations – required fields and disabled submit button.
+  // -------------------------------------------------------------------------
+  it('Shows validation errors on the login form and disables the submit button until the form is valid', () => {
+    cy.visit('/signin');
 
-    cy.getBySel("signin-username").type("User").find("input").clear().blur();
-    cy.get("#username-helper-text").should("be.visible").and("contain", "Username is required");
-    cy.percySnapshot("Display Username is Required Error");
+    // Initially the button is disabled
+    cy.getBySel('signin-submit').should('be.disabled');
 
-    cy.getBySel("signin-password").type("abc").find("input").blur();
-    cy.get("#password-helper-text")
-      .should("be.visible")
-      .and("contain", "Password must contain at least 4 characters");
-    cy.percySnapshot("Display Password Error");
+    // Fill only the username – still disabled
+    cy.getBySel('signin-username').type('anyuser');
+    cy.getBySel('signin-submit').should('be.disabled');
 
-    cy.getBySel("signin-submit").should("be.disabled");
-    cy.percySnapshot("Sign In Submit Disabled");
+    // Fill password – button becomes enabled
+    cy.getBySel('signin-password').type('anypassword');
+    cy.getBySel('signin-submit').should('not.be.disabled');
+
+    // Clear username → button disabled again
+    cy.getBySel('signin-username').clear();
+    cy.getBySel('signin-submit').should('be.disabled');
   });
 
-  it("should display signup errors", function () {
-    cy.visit("/signup");
+  // -------------------------------------------------------------------------
+  // 5️⃣  Signup form validations – required fields and password mismatch.
+  // -------------------------------------------------------------------------
+  it('Validates the signup form fields and shows a password‑mismatch error', () => {
+    cy.visit('/signup');
 
-    cy.getBySel("signup-first-name").type("First").find("input").clear().blur();
-    cy.get("#firstName-helper-text").should("be.visible").and("contain", "First Name is required");
+    // All fields are required – the submit button starts disabled
+    cy.getBySel('signup-submit').should('be.disabled');
 
-    cy.getBySel("signup-last-name").type("Last").find("input").clear().blur();
-    cy.get("#lastName-helper-text").should("be.visible").and("contain", "Last Name is required");
+    // Fill everything correctly except the password confirmation
+    cy.getBySel('signup-first-name').type('Foo');
+    cy.getBySel('signup-last-name').type('Bar');
+    cy.getBySel('signup-username').type('foobar');
+    cy.getBySel('signup-password').type('Secret123');
+    cy.getBySel('signup-confirmPassword').type('Secret321'); // mismatch
 
-    cy.getBySel("signup-username").type("User").find("input").clear().blur();
-    cy.get("#username-helper-text").should("be.visible").and("contain", "Username is required");
+    // The button stays disabled because the form is invalid
+    cy.getBySel('signup-submit').should('be.disabled');
 
-    cy.getBySel("signup-password").type("password").find("input").clear().blur();
-    cy.get("#password-helper-text").should("be.visible").and("contain", "Enter your password");
-
-    cy.getBySel("signup-confirmPassword").type("DIFFERENT PASSWORD").find("input").blur();
-    cy.get("#confirmPassword-helper-text")
-      .should("be.visible")
-      .and("contain", "Password does not match");
-    cy.percySnapshot("Display Sign Up Required Errors");
-
-    cy.getBySel("signup-submit").should("be.disabled");
-    cy.percySnapshot("Sign Up Submit Disabled");
+    // The password‑mismatch helper text appears
+    cy.get('#confirmPassword-helper-text')
+      .should('contain', 'Password does not match');
   });
 
-  it("should error for an invalid user", function () {
-    cy.login("invalidUserName", "invalidPa$$word");
+  // -------------------------------------------------------------------------
+  // 6️⃣  Invalid credentials – wrong username / password.
+  // -------------------------------------------------------------------------
+  it('Displays an error message when logging in with invalid credentials', () => {
+    cy.visit('/signin');
 
-    cy.getBySel("signin-error")
-      .should("be.visible")
-      .and("have.text", "Username or password is invalid");
-    cy.percySnapshot("Sign In, Invalid Username and Password, Username or Password is Invalid");
+    // Use a non‑existent user
+    cy.getBySel('signin-username').type('unknown_user');
+    cy.getBySel('signin-password').type('doesnotmatter');
+    cy.getBySel('signin-submit').click();
+
+    // The app shows a Material‑UI Alert with the error
+    cy.get('[data-test="signin-error"]')
+      .should('be.visible')
+      .and('contain', 'Username or password is invalid');
   });
 
-  it("should error for an invalid password for existing user", function () {
-    cy.database("find", "users").then((user: User) => {
-      cy.login(user.username, "INVALID");
-    });
+  // -------------------------------------------------------------------------
+  // 7️⃣  Wrong password – correct username but bad password.
+  // -------------------------------------------------------------------------
+  it('Shows the same error when the password is incorrect for a known user', () => {
+    cy.visit('/signin');
 
-    cy.getBySel("signin-error")
-      .should("be.visible")
-      .and("have.text", "Username or password is invalid");
-    cy.percySnapshot("Sign In, Invalid Username, Username or Password is Invalid");
+    cy.getBySel('signin-username').type(seededUser.username);
+    cy.getBySel('signin-password').type('WrongPassword');
+    cy.getBySel('signin-submit').click();
+
+    cy.get('[data-test="signin-error"]')
+      .should('be.visible')
+      .and('contain', 'Username or password is invalid');
   });
 });

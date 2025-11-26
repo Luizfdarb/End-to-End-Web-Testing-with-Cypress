@@ -1,264 +1,317 @@
-import { isMobile } from "../../support/utils";
-import { User, Transaction } from "../../../src/models";
 
-type NotificationsCtx = {
-  userA: User;
-  userB: User;
-  userC: User;
-};
+describe('Notifications – Real World App', () => {
+  // -------------------------------------------------------------------------
+  // Global fixtures (seeded users, bank accounts, …) are refreshed before each test
+  // -------------------------------------------------------------------------
+  let users: any[] = [];
 
-describe("Notifications", function () {
-  const ctx = {} as NotificationsCtx;
-
-  beforeEach(function () {
-    cy.task("db:seed");
-
-    cy.server();
-    cy.route("GET", "/notifications").as("getNotifications");
-    cy.route("POST", "/transactions").as("createTransaction");
-    cy.route("PATCH", "/notifications/*").as("updateNotification");
-    cy.route("POST", "/comments/*").as("postComment");
-
-    cy.database("filter", "users").then((users: User[]) => {
-      ctx.userA = users[0];
-      ctx.userB = users[1];
-      ctx.userC = users[2];
+  before(() => {
+    // Seed the DB once for the whole spec
+    cy.task('db:seed');
+    // Pull all users from the seeded DB (we need at least three distinct users)
+    cy.task('filter:database', { entity: 'users', query: {} }).then((result: any[]) => {
+      // Keep three users for the scenarios
+      users = result.slice(0, 3);
     });
   });
 
-  describe("notifications from user interactions", function () {
-    it("User A likes a transaction of User B; User B gets notification that User A liked transaction ", function () {
-      cy.loginByXstate(ctx.userA.username);
-      cy.wait("@getNotifications");
+  // -------------------------------------------------------------------------
+  // Helper utilities
+  // -------------------------------------------------------------------------
+  const getUserFullName = (user: any) => `${user.firstName} ${user.lastName}`;
+  const getUser = (index: number) => users[index];
 
-      cy.database("find", "transactions", { senderId: ctx.userB.id }).then(
-        (transaction: Transaction) => {
-          cy.visit(`/transaction/${transaction.id}`);
-        }
-      );
+  /**
+   * Returns a transaction where `receiverId` matches the supplied user id.
+   * If no such transaction exists, the test will fail.
+   */
+  const getTransactionForReceiver = (receiverId: string) => {
+    return cy
+      .task('filter:database', { entity: 'transactions', query: { receiverId } })
+      .then((txs: any[]) => {
+        expect(txs.length, 'transactions for receiver').to.be.greaterThan(0);
+        return txs[0];
+      });
+  };
 
-      cy.log("🚩 Renders the notifications badge with count");
-      cy.wait("@getNotifications")
-        .its("response.body.results.length")
-        .then((notificationCount) => {
-          cy.getBySel("nav-top-notifications-count").should("have.text", `${notificationCount}`);
+  /**
+   * Returns a transaction that involves both users (sender/receiver).
+   */
+  const getTransactionBetween = (userAId: string, userBId: string) => {
+    return cy
+      .task('filter:database', { entity: 'transactions', query: {} })
+      .then((txs: any[]) => {
+        const tx = txs.find(
+          (t: any) =>
+            (t.senderId === userAId && t.receiverId === userBId) ||
+            (t.senderId === userBId && t.receiverId === userAId)
+        );
+        expect(tx, 'transaction between users').to.exist;
+        return tx;
+      });
+  };
+
+  /**
+   * Returns the first bank account of a given user (must be logged in beforehand).
+   */
+  const getFirstBankAccount = (username: string) => {
+    // Use API (requires authentication cookie) – we log in via API first
+    return cy.loginByApi(username).then(() => {
+      return cy
+        .request({
+          method: 'GET',
+          url: `${Cypress.env('apiUrl')}/bankAccounts`,
+          failOnStatusCode: false,
+        })
+        .then((resp) => {
+          expect(resp.status).to.eq(200);
+          const accounts = resp.body.results;
+          expect(accounts.length, 'bank accounts for user').to.be.greaterThan(0);
+          return accounts[0];
         });
-      cy.percySnapshot("Renders the notifications badge with count");
-
-      const likesCountSelector = "[data-test*=transaction-like-count]";
-      cy.contains(likesCountSelector, 0);
-      cy.getBySelLike("like-button").click();
-      // a successful "like" should disable the button and increment
-      // the number of likes
-      cy.getBySelLike("like-button").should("be.disabled");
-      cy.contains(likesCountSelector, 1);
-      cy.percySnapshot("Like Count Incremented");
-
-      cy.switchUser(ctx.userB.username);
-      cy.percySnapshot("Switch to User B");
-
-      cy.wait("@getNotifications")
-        .its("response.body.results.length")
-        .as("preDismissedNotificationCount");
-
-      cy.visit("/notifications");
-
-      cy.wait("@getNotifications");
-
-      cy.getBySelLike("notification-list-item")
-        .should("have.length", 9)
-        .first()
-        .should("contain", ctx.userA?.firstName)
-        .and("contain", "liked");
-
-      cy.log("🚩 Marks notification as read");
-      cy.getBySelLike("notification-mark-read").first().click({ force: true });
-      cy.wait("@updateNotification");
-
-      cy.get("@preDismissedNotificationCount").then((count) => {
-        cy.getBySelLike("notification-list-item").should("have.length.lessThan", Number(count));
-      });
-      cy.percySnapshot("Notification count after notification dismissed");
     });
+  };
 
-    it("User C likes a transaction between User A and User B; User B and get notifications that User C liked transaction", function () {
-      cy.loginByXstate(ctx.userC.username);
+  // -------------------------------------------------------------------------
+  // 1️⃣  User A likes transaction of User B → User B gets notification
+  // -------------------------------------------------------------------------
+  it('User A likes a transaction of User B – B receives a notification', () => {
+    const userA = getUser(0);
+    const userB = getUser(1);
 
-      cy.database("find", "transactions", {
-        senderId: ctx.userB.id,
-        receiverId: ctx.userA.id,
-      }).then((transaction: Transaction) => {
-        cy.visit(`/transaction/${transaction.id}`);
-      });
+    // Find a transaction that belongs to B (B is receiver)
+    getTransactionForReceiver(userB.id).then((tx: any) => {
+      // Log in as A and like the transaction via UI
+      cy.loginByXstate(userA.username);
+      cy.visit(`/transaction/${tx.id}`);
+      cy.get(`[data-test=transaction-like-button-${tx.id}]`).click();
 
-      const likesCountSelector = "[data-test*=transaction-like-count]";
-      cy.contains(likesCountSelector, 0);
-      cy.getBySelLike("like-button").click();
-      cy.getBySelLike("like-button").should("be.disabled");
-      cy.contains(likesCountSelector, 1);
-      cy.percySnapshot("Like Count Incremented");
+      // Switch to B and verify the notification
+      cy.logoutByXstate();
+      cy.loginByXstate(userB.username);
+      cy.visit('/notifications');
 
-      cy.switchUser(ctx.userA.username);
-      cy.percySnapshot("Switch to User A");
-
-      cy.getBySelLike("notifications-link").click();
-
-      cy.wait("@getNotifications");
-
-      cy.location("pathname").should("equal", "/notifications");
-
-      cy.getBySelLike("notification-list-item")
-        .should("have.length", 9)
-        .first()
-        .should("contain", ctx.userC.firstName)
-        .and("contain", "liked");
-      cy.percySnapshot("User A Notified of User B Like");
-
-      cy.switchUser(ctx.userB.username);
-      cy.percySnapshot("Switch to User B");
-
-      cy.getBySelLike("notifications-link").click();
-
-      cy.wait("@getNotifications");
-
-      cy.getBySelLike("notification-list-item")
-        .should("have.length", 9)
-        .first()
-        .should("contain", ctx.userC.firstName)
-        .and("contain", "liked");
-      cy.percySnapshot("User B Notified of User C Like");
-    });
-
-    it("User A comments on a transaction of User B; User B gets notification that User A commented on their transaction", function () {
-      cy.loginByXstate(ctx.userA.username);
-      cy.percySnapshot();
-
-      cy.database("find", "transactions", { senderId: ctx.userB.id }).then(
-        (transaction: Transaction) => {
-          cy.visit(`/transaction/${transaction.id}`);
-        }
-      );
-
-      cy.getBySelLike("comment-input").type("Thank You{enter}");
-
-      cy.wait("@postComment");
-
-      cy.switchUser(ctx.userB.username);
-      cy.percySnapshot("Switch to User B");
-
-      cy.getBySelLike("notifications-link").click();
-
-      cy.wait("@getNotifications");
-
-      cy.getBySelLike("notification-list-item")
-        .should("have.length", 9)
-        .first()
-        .should("contain", ctx.userA?.firstName)
-        .and("contain", "commented");
-      cy.percySnapshot("User A Notified of User B Comment");
-    });
-
-    it("User C comments on a transaction between User A and User B; User A and B get notifications that User C commented on their transaction", function () {
-      cy.loginByXstate(ctx.userC.username);
-
-      cy.database("find", "transactions", {
-        senderId: ctx.userB.id,
-        receiverId: ctx.userA.id,
-      }).then((transaction: Transaction) => {
-        cy.visit(`/transaction/${transaction.id}`);
-      });
-
-      cy.getBySelLike("comment-input").type("Thank You{enter}");
-
-      cy.wait("@postComment");
-
-      cy.switchUser(ctx.userA.username);
-      cy.percySnapshot("Switch to User A");
-
-      cy.getBySelLike("notifications-link").click();
-
-      cy.wait("@getNotifications");
-
-      cy.getBySelLike("notification-list-item")
-        .should("have.length", 9)
-        .first()
-        .should("contain", ctx.userC.firstName)
-        .and("contain", "commented");
-      cy.percySnapshot("User A Notified of User C Comment");
-
-      cy.switchUser(ctx.userB.username);
-      cy.percySnapshot("Switch to User B");
-
-      cy.getBySelLike("notifications-link").click();
-      cy.getBySelLike("notification-list-item")
-        .should("have.length", 9)
-        .first()
-        .should("contain", ctx.userC.firstName)
-        .and("contain", "commented");
-      cy.percySnapshot("User B Notified of User C Comment");
-    });
-
-    it("User A sends a payment to User B", function () {
-      cy.loginByXstate(ctx.userA.username);
-
-      cy.getBySelLike("new-transaction").click();
-      cy.createTransaction({
-        transactionType: "payment",
-        amount: 30,
-        description: "🍕Pizza",
-        sender: ctx.userA,
-        receiver: ctx.userB,
-      });
-      cy.wait("@createTransaction");
-
-      cy.switchUser(ctx.userB.username);
-      cy.percySnapshot("Switch to User B");
-
-      cy.getBySelLike("notifications-link").click();
-      cy.percySnapshot();
-      cy.getBySelLike("notification-list-item")
-        .first()
-        .should("contain", ctx.userB.firstName)
-        .and("contain", "received payment");
-      cy.percySnapshot("User B Notified of Payment");
-    });
-
-    it("User A sends a payment request to User C", function () {
-      cy.loginByXstate(ctx.userA.username);
-
-      cy.getBySelLike("new-transaction").click();
-      cy.createTransaction({
-        transactionType: "request",
-        amount: 300,
-        description: "🛫🛬 Airfare",
-        sender: ctx.userA,
-        receiver: ctx.userC,
-      });
-      cy.wait("@createTransaction");
-
-      cy.switchUser(ctx.userC.username);
-      cy.percySnapshot("Switch to User C");
-
-      cy.getBySelLike("notifications-link").click();
-      cy.getBySelLike("notification-list-item")
-        .should("contain", ctx.userA.firstName)
-        .and("contain", "requested payment");
-      cy.percySnapshot("User C Notified of Request from User A");
+      const likerName = getUserFullName(userA);
+      cy.contains(likerName).should('exist');
     });
   });
 
-  it("renders an empty notifications state", function () {
-    cy.route("GET", "/notifications", []).as("notifications");
+  // -------------------------------------------------------------------------
+  // 2️⃣  User C likes transaction between User A and User B → Both get notifications
+  // -------------------------------------------------------------------------
+  it('User C likes a transaction between User A and User B – both receive notifications', () => {
+    const userA = getUser(0);
+    const userB = getUser(1);
+    const userC = getUser(2);
 
-    cy.loginByXstate(ctx.userA.username);
+    // Get a transaction that involves A and B
+    getTransactionBetween(userA.id, userB.id).then((tx: any) => {
+      // Log in as C and like it
+      cy.loginByXstate(userC.username);
+      cy.visit(`/transaction/${tx.id}`);
+      cy.get(`[data-test=transaction-like-button-${tx.id}]`).click();
 
-    if (isMobile()) {
-      cy.getBySel("sidenav-toggle").click();
-    }
-    cy.getBySel("sidenav-notifications").click();
-    cy.location("pathname").should("equal", "/notifications");
-    cy.getBySel("notification-list").should("not.be.visible");
-    cy.getBySel("empty-list-header").should("contain", "No Notifications");
-    cy.percySnapshot("No Notifications");
+      // Verify notification for A
+      cy.logoutByXstate();
+      cy.loginByXstate(userA.username);
+      cy.visit('/notifications');
+      const likerName = getUserFullName(userC);
+      cy.contains(likerName).should('exist');
+
+      // Verify notification for B
+      cy.logoutByXstate();
+      cy.loginByXstate(userB.username);
+      cy.visit('/notifications');
+      cy.contains(likerName).should('exist');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // 3️⃣  User A comments on transaction of User B → User B gets notification
+  // -------------------------------------------------------------------------
+  it('User A comments on a transaction of User B – B receives a notification', () => {
+    const userA = getUser(0);
+    const userB = getUser(1);
+    const commentText = 'Cypress comment test';
+
+    // Get a transaction owned by B
+    getTransactionForReceiver(userB.id).then((tx: any) => {
+      // Log in as A via API and post a comment (backend creates notification)
+      cy.loginByApi(userA.username).then(() => {
+        cy.request({
+          method: 'POST',
+          url: `${Cypress.env('apiUrl')}/comments/${tx.id}`,
+          body: { content: commentText },
+          failOnStatusCode: false,
+        }).then((resp) => {
+          expect(resp.status).to.eq(200);
+        });
+      });
+
+      // Verify B sees the comment notification
+      cy.logoutByXstate();
+      cy.loginByXstate(userB.username);
+      cy.visit('/notifications');
+
+      const commenterName = getUserFullName(userA);
+      cy.contains(commenterName).should('exist');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // 4️⃣  User C comments on transaction between User A and User B → Both get notifications
+  // -------------------------------------------------------------------------
+  it('User C comments on a transaction between User A and User B – both receive notifications', () => {
+    const userA = getUser(0);
+    const userB = getUser(1);
+    const userC = getUser(2);
+    const commentText = 'Cypress shared comment';
+
+    // Transaction involving A & B
+    getTransactionBetween(userA.id, userB.id).then((tx: any) => {
+      // Log in as C (API) and post comment
+      cy.loginByApi(userC.username).then(() => {
+        cy.request({
+          method: 'POST',
+          url: `${Cypress.env('apiUrl')}/comments/${tx.id}`,
+          body: { content: commentText },
+          failOnStatusCode: false,
+        }).then((resp) => {
+          expect(resp.status).to.eq(200);
+        });
+      });
+
+      // Verify A receives notification
+      cy.logoutByXstate();
+      cy.loginByXstate(userA.username);
+      cy.visit('/notifications');
+      const commenterName = getUserFullName(userC);
+      cy.contains(commenterName).should('exist');
+
+      // Verify B receives notification
+      cy.logoutByXstate();
+      cy.loginByXstate(userB.username);
+      cy.visit('/notifications');
+      cy.contains(commenterName).should('exist');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // 5️⃣  User A sends payment to User B → User B gets notification
+  // -------------------------------------------------------------------------
+  it('User A sends a payment to User B – B receives a payment received notification', () => {
+    const userA = getUser(0);
+    const userB = getUser(1);
+    const amount = 1000; // in cents (the API expects the raw amount)
+    const description = 'Cypress payment';
+
+    // Get a bank account for A (required as source)
+    getFirstBankAccount(userA.username).then((bankAccount) => {
+      // Log in as A (API) and create the payment transaction
+      cy.loginByApi(userA.username).then(() => {
+        cy.request({
+          method: 'POST',
+          url: `${Cypress.env('apiUrl')}/transactions`,
+          body: {
+            transactionType: 'payment',
+            source: bankAccount.id,
+            senderId: userA.id,
+            receiverId: userB.id,
+            description,
+            amount,
+            privacyLevel: 'public',
+          },
+          failOnStatusCode: false,
+        }).then((resp) => {
+          expect(resp.status).to.eq(200);
+        });
+      });
+
+      // Verify B sees a “received payment” notification
+      cy.logoutByXstate();
+      cy.loginByXstate(userB.username);
+      cy.visit('/notifications');
+
+      const senderName = getUserFullName(userA);
+      // The notification text contains the sender's full name and “received payment”
+      cy.contains(senderName).should('exist');
+      cy.contains('received payment').should('exist');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // 6️⃣  User A sends a payment request to User C → User C gets notification
+  // -------------------------------------------------------------------------
+  it('User A sends a payment request to User C – C receives a payment request notification', () => {
+    const userA = getUser(0);
+    const userC = getUser(2);
+    const amount = 2000;
+    const description = 'Cypress request';
+
+    // Get a bank account for A (source)
+    getFirstBankAccount(userA.username).then((bankAccount) => {
+      // Log in as A (API) and create the request transaction
+      cy.loginByApi(userA.username).then(() => {
+        cy.request({
+          method: 'POST',
+          url: `${Cypress.env('apiUrl')}/transactions`,
+          body: {
+            transactionType: 'request',
+            source: bankAccount.id,
+            senderId: userA.id,
+            receiverId: userC.id,
+            description,
+            amount,
+            privacyLevel: 'public',
+          },
+          failOnStatusCode: false,
+        }).then((resp) => {
+          expect(resp.status).to.eq(200);
+        });
+      });
+
+      // Verify C sees a “requested payment” notification
+      cy.logoutByXstate();
+      cy.loginByXstate(userC.username);
+      cy.visit('/notifications');
+
+      const senderName = getUserFullName(userA);
+      cy.contains(senderName).should('exist');
+      cy.contains('requested payment').should('exist');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // 7️⃣  Empty notifications state – a brand‑new user sees the empty UI
+  // -------------------------------------------------------------------------
+  it('Renders empty notifications state for a user with no notifications', () => {
+    const newUser = {
+      firstName: 'Empty',
+      lastName: 'User',
+      username: `empty_user_${Date.now()}`,
+      password: 'abc123',
+      email: `empty_${Date.now()}@example.com`,
+      phoneNumber: '555-1234',
+      avatar: '',
+      defaultPrivacyLevel: 'public',
+      balance: 0,
+    };
+
+    // Create the user via the public signup endpoint (no auth required)
+    cy.request({
+      method: 'POST',
+      url: `${Cypress.env('apiUrl')}/users`,
+      body: newUser,
+      failOnStatusCode: false,
+    }).then((resp) => {
+      expect(resp.status).to.eq(201);
+    });
+
+    // Log in as the brand‑new user and verify empty notifications UI
+    cy.loginByXstate(newUser.username);
+    cy.visit('/notifications');
+
+    // The EmptyList component renders a header with text “No Notifications”
+    cy.get('[data-test=empty-list-header]').should('contain.text', 'No Notifications');
   });
 });

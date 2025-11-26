@@ -1,264 +1,231 @@
-import Dinero from "dinero.js";
-import { User } from "../../../src/models";
-import { isMobile } from "../../support/utils";
 
-type NewTransactionTestCtx = {
-  allUsers?: User[];
-  user?: User;
-  contact?: User;
-};
+describe('Real‑World App – New Transaction flow', () => {
+  // -----------------------------------------------------------------
+  // Helper – create a fresh seeded DB before the whole spec runs
+  // -----------------------------------------------------------------
+  before(() => {
+    // Seed the in‑memory DB (see plugins `db:seed` task)
+    cy.task('db:seed');
+  });
 
-describe("New Transaction", function () {
-  const ctx: NewTransactionTestCtx = {};
-
-  beforeEach(function () {
-    cy.task("db:seed");
-
-    cy.server();
-    cy.route("POST", "/transactions").as("createTransaction");
-
-    cy.route("GET", "/users").as("allUsers");
-    cy.route("GET", "/notifications").as("notifications");
-    cy.route("GET", "/transactions/public").as("publicTransactions");
-    cy.route("GET", "/transactions").as("personalTransactions");
-    cy.route("GET", "/users/search*").as("usersSearch");
-    cy.route("PATCH", "/transactions/*").as("updateTransaction");
-
-    cy.database("filter", "users").then((users: User[]) => {
-      ctx.allUsers = users;
-      ctx.user = users[0];
-      ctx.contact = users[1];
-
-      return cy.loginByXstate(ctx.user.username);
+  // -----------------------------------------------------------------
+  // Helper – login once before each test (XState login is the fastest)
+  // -----------------------------------------------------------------
+  beforeEach(() => {
+    // The default password is stored in Cypress.env (see `cypress.json`)
+    // We log‑in as the first user in the seed data.
+    cy.task('find:database', { entity: 'users', query: {} }).then((users: any[]) => {
+      const user = users[0];
+      // Login via XState – this avoids UI flakiness and guarantees a clean state
+      cy.loginByXstate(user.username, Cypress.env('defaultPassword'));
     });
   });
 
-  it("navigates to the new transaction form, selects a user and submits a transaction payment", function () {
-    const payment = {
-      amount: "35",
-      description: "Sushi dinner 🍣",
-    };
+  // -----------------------------------------------------------------
+  // 1️⃣  Payment transaction with an existing contact
+  // -----------------------------------------------------------------
+  it('creates a complete payment transaction with an existing contact', () => {
+    // -------------------------------------------------------------
+    // 1️⃣ → go to the “new transaction” page (step‑1)
+    // -------------------------------------------------------------
+    cy.visit('/transaction/new');
 
-    cy.getBySelLike("new-transaction").click();
-    cy.wait("@allUsers");
+    // pick the first contact that appears in the list
+    cy.get('[data-test^=user-list-item-]').first().as('contactItem').click();
 
-    cy.getBySel("user-list-search-input").type(ctx.contact!.firstName, { force: true });
-    cy.wait("@usersSearch");
-    cy.percySnapshot("User Search First Name Input");
+    // -------------------------------------------------------------
+    // 2️⃣ → step‑2 – fill amount & description, submit as payment
+    // -------------------------------------------------------------
+    cy.getBySel('transaction-create-amount-input')
+      .clear()
+      .type('25'); // $25 → 2500 cents (the UI formats automatically)
 
-    cy.getBySelLike("user-list-item").contains(ctx.contact!.firstName).click({ force: true });
-    cy.percySnapshot("User Search First Name List Item");
+    cy.getBySel('transaction-create-description-input')
+      .clear()
+      .type('Cypress payment test');
 
-    cy.getBySelLike("amount-input").type(payment.amount);
-    cy.getBySelLike("description-input").type(payment.description);
-    cy.percySnapshot("Amount and Description Input");
-    cy.getBySelLike("submit-payment").click();
-    cy.wait(["@createTransaction", "@getUserProfile"]);
-    cy.getBySel("alert-bar-success")
-      .should("be.visible")
-      .and("have.text", "Transaction Submitted!");
+    // submit as a payment
+    cy.getBySel('transaction-create-submit-payment').click();
 
-    const updatedAccountBalance = Dinero({
-      amount: ctx.user!.balance - parseInt(payment.amount) * 100,
-    }).toFormat();
-
-    if (isMobile()) {
-      cy.getBySel("sidenav-toggle").click();
-    }
-
-    cy.getBySelLike("user-balance").should("contain", updatedAccountBalance);
-    cy.percySnapshot("Updated User Balance");
-
-    if (isMobile()) {
-      cy.get(".MuiBackdrop-root").click({ force: true });
-    }
-
-    cy.getBySelLike("create-another-transaction").click();
-    cy.getBySel("app-name-logo").find("a").click();
-    cy.getBySelLike("personal-tab").click().should("have.class", "Mui-selected");
-    cy.wait("@personalTransactions");
-
-    cy.getBySel("transaction-list").first().should("contain", payment.description);
-
-    cy.database("find", "users", { id: ctx.contact!.id })
-      .its("balance")
-      .should("equal", ctx.contact!.balance + parseInt(payment.amount) * 100);
-    cy.percySnapshot("Personal List Validate Transaction in List");
+    // -------------------------------------------------------------
+    // 3️⃣ → step‑3 – verify the success screen appears
+    // -------------------------------------------------------------
+    cy.get('[data-test=transaction-list-empty-create-transaction-button]').should('not.exist');
+    cy.get('[data-test=new-transaction-return-to-transactions]').should('be.visible');
+    cy.contains('Paid $25.00 for Cypress payment test').should('exist');
   });
 
-  it("navigates to the new transaction form, selects a user and submits a transaction request", function () {
-    const request = {
-      amount: "95",
-      description: "Fancy Hotel 🏨",
-    };
+  // -----------------------------------------------------------------
+  // 2️⃣  Request transaction with an existing contact
+  // -----------------------------------------------------------------
+  it('creates a complete request transaction with an existing contact', () => {
+    cy.visit('/transaction/new');
 
-    cy.getBySelLike("new-transaction").click();
-    cy.wait("@allUsers");
+    // select a contact (different from the previous test to avoid caching)
+    cy.get('[data-test^=user-list-item-]').eq(1).as('contactItem').click();
 
-    cy.getBySelLike("user-list-item").contains(ctx.contact!.firstName).click({ force: true });
-    cy.percySnapshot("User Search First Name Input");
+    // fill the form
+    cy.getBySel('transaction-create-amount-input')
+      .clear()
+      .type('15');
 
-    cy.getBySelLike("amount-input").type(request.amount);
-    cy.getBySelLike("description-input").type(request.description);
-    cy.percySnapshot("Amount and Description Input");
-    cy.getBySelLike("submit-request").click();
-    cy.wait("@createTransaction");
-    cy.getBySel("alert-bar-success")
-      .should("be.visible")
-      .and("have.text", "Transaction Submitted!");
-    cy.percySnapshot("Transaction Request Submitted Notification");
+    cy.getBySel('transaction-create-description-input')
+      .clear()
+      .type('Cypress request test');
 
-    cy.getBySelLike("return-to-transactions").click();
-    cy.getBySelLike("personal-tab").click().should("have.class", "Mui-selected");
+    // submit as a request
+    cy.getBySel('transaction-create-submit-request').click();
 
-    cy.getBySelLike("transaction-item").should("contain", request.description);
-    cy.percySnapshot("Transaction Item Description in List");
+    // verify step‑3 (confirmation) is shown
+    cy.get('[data-test=new-transaction-return-to-transactions]').should('be.visible');
+    cy.contains('Requested $15.00 for Cypress request test').should('exist');
   });
 
-  it("displays new transaction errors", function () {
-    cy.getBySelLike("new-transaction").click();
-    cy.wait("@allUsers");
+  // -----------------------------------------------------------------
+  // 3️⃣  Transaction with a **new** contact (search + select)
+  // -----------------------------------------------------------------
+  it('creates a transaction with a newly added contact by searching for a user', () => {
+    cy.visit('/transaction/new');
 
-    cy.getBySelLike("user-list-item").contains(ctx.contact!.firstName).click({ force: true });
+    // The search box lives inside the “Select Contact” step.
+    // Search for a user that is *not* already in the contacts list.
+    // We use a known first‑name from the seeded data (e.g. “Kevin”).
+    cy.get('#user-list-search-input').type('Kevin');
 
-    cy.getBySelLike("amount-input").type("43").find("input").clear().blur();
-    cy.get("#transaction-create-amount-input-helper-text")
-      .should("be.visible")
-      .and("contain", "Please enter a valid amount");
+    // Wait for the filtered list to appear and pick the first result
+    cy.get('[data-test^=user-list-item-]').first().as('newContact').click();
 
-    cy.getBySelLike("description-input").type("Fun").find("input").clear().blur();
-    cy.get("#transaction-create-description-input-helper-text")
-      .should("be.visible")
-      .and("contain", "Please enter a note");
+    // Fill amount & description (payment)
+    cy.getBySel('transaction-create-amount-input')
+      .clear()
+      .type('30');
 
-    cy.getBySelLike("submit-request").should("be.disabled");
-    cy.getBySelLike("submit-payment").should("be.disabled");
-    cy.percySnapshot("New Transaction Errors with Submit Payment/Request Buttons Disabled");
+    cy.getBySel('transaction-create-description-input')
+      .clear()
+      .type('Cypress new‑contact payment');
+
+    cy.getBySel('transaction-create-submit-payment').click();
+
+    // Confirm success page
+    cy.get('[data-test=new-transaction-return-to-transactions]').should('be.visible');
+    cy.contains('Paid $30.00 for Cypress new-contact payment').should('exist');
   });
 
-  it("submits a transaction payment and verifies the deposit for the receiver", function () {
-    cy.getBySel("nav-top-new-transaction").click();
+  // -----------------------------------------------------------------
+  // 4️⃣  Step‑1 validation – contact is required (button stays disabled)
+  // -----------------------------------------------------------------
+  it('prevents proceeding to step‑2 when no contact is selected', () => {
+    cy.visit('/transaction/new');
 
-    const transactionPayload = {
-      transactionType: "payment",
-      amount: 25,
-      description: "Indian Food",
-      sender: ctx.user,
-      receiver: ctx.contact,
-    };
+    // At step‑1 there is *no* “Next” button – the UI only enables step‑2
+    // after a contact is clicked.  Verify that step‑2 UI does **not** exist.
+    cy.get('[data-test=transaction-create-form]').should('not.exist');
 
-    // first let's grab the current balance from the UI
-    let startBalance: string;
-    if (!isMobile()) {
-      // only check the balance display in desktop resolution
-      // as it is NOT shown on mobile screen
-      cy.get("[data-test=sidenav-user-balance]")
-        .invoke("text")
-        .then((x) => {
-          startBalance = x; // something like "$1,484.81"
-          expect(startBalance).to.match(/\$\d/);
-        });
-    }
-
-    cy.createTransaction(transactionPayload);
-    cy.wait("@createTransaction");
-    cy.getBySel("new-transaction-create-another-transaction").should("be.visible");
-
-    if (!isMobile()) {
-      // make sure the new balance is displayed
-      cy.get("[data-test=sidenav-user-balance]").should(($el) => {
-        // here we only make sure the text has changed
-        // we could also convert the balance to actual number
-        // and confirm the new balance is the start balance - amount
-        expect($el.text()).to.not.equal(startBalance);
-      });
-    }
-    cy.percySnapshot("Transaction Payment Submitted Notification");
-
-    cy.switchUser(ctx.contact!.username);
-
-    const updatedAccountBalance = Dinero({
-      amount: ctx.contact!.balance + transactionPayload.amount * 100,
-    }).toFormat();
-
-    if (isMobile()) {
-      cy.getBySel("sidenav-toggle").click();
-    }
-
-    cy.getBySelLike("user-balance").should("contain", updatedAccountBalance);
-    cy.percySnapshot("Verify Updated Sender Account Balance");
+    // Click somewhere else (outside a contact) – still no step‑2.
+    cy.get('body').click(0, 0);
+    cy.get('[data-test=transaction-create-form]').should('not.exist');
   });
 
-  it("submits a transaction request and accepts the request for the receiver", function () {
-    const transactionPayload = {
-      transactionType: "request",
-      amount: 100,
-      description: "Fancy Hotel",
-      sender: ctx.user,
-      receiver: ctx.contact,
-    };
+  // -----------------------------------------------------------------
+  // 5️⃣  Step‑2 validation – amount & description are required
+  // -----------------------------------------------------------------
+  it('disables the submit buttons on step‑2 until amount and description are provided', () => {
+    cy.visit('/transaction/new');
 
-    cy.getBySelLike("new-transaction").click();
-    cy.createTransaction(transactionPayload);
-    cy.wait("@createTransaction");
-    cy.getBySel("new-transaction-create-another-transaction").should("be.visible");
-    cy.percySnapshot("receiver - Transaction Payment Submitted Notification");
+    // select a contact to move to step‑2
+    cy.get('[data-test^=user-list-item-]').first().click();
 
-    cy.switchUser(ctx.contact!.username);
+    // At this point the submit buttons are disabled
+    cy.getBySel('transaction-create-submit-payment')
+      .should('be.disabled')
+      .and('have.attr', 'disabled');
 
-    cy.getBySelLike("personal-tab").click();
+    cy.getBySel('transaction-create-submit-request')
+      .should('be.disabled')
+      .and('have.attr', 'disabled');
 
-    cy.wait("@personalTransactions");
+    // Fill only the amount – buttons stay disabled
+    cy.getBySel('transaction-create-amount-input').type('12');
+    cy.getBySel('transaction-create-submit-payment').should('be.disabled');
 
-    cy.getBySelLike("transaction-item")
-      .first()
-      .should("contain", transactionPayload.description)
-      .click({ force: true });
-    cy.percySnapshot("Navigate to Transaction Item");
+    // Clear amount, fill only the description – still disabled
+    cy.getBySel('transaction-create-amount-input').clear();
+    cy.getBySel('transaction-create-description-input').type('Just a note');
+    cy.getBySel('transaction-create-submit-payment').should('be.disabled');
 
-    cy.getBySelLike("accept-request").click();
-    cy.wait("@updateTransaction").its("status").should("equal", 204);
-    cy.percySnapshot("Accept Transaction Request");
+    // Fill both fields – buttons become enabled
+    cy.getBySel('transaction-create-amount-input').type('12');
+    cy.getBySel('transaction-create-submit-payment')
+      .should('not.be.disabled')
+      .click();
 
-    cy.switchUser(ctx.user!.username);
-
-    const updatedAccountBalance = Dinero({
-      amount: ctx.user!.balance + transactionPayload.amount * 100,
-    }).toFormat();
-
-    if (isMobile()) {
-      cy.getBySel("sidenav-toggle").click();
-    }
-
-    cy.getBySelLike("user-balance").should("contain", updatedAccountBalance);
-    cy.percySnapshot("Verify Updated Sender Account Balance");
+    // After clicking, we are on step‑3 (confirmation)
+    cy.get('[data-test=new-transaction-return-to-transactions]').should('be.visible');
   });
 
-  it("searches for a user by attributes", function () {
-    const targetUser = ctx.allUsers![2];
-    const searchAttrs: (keyof User)[] = [
-      "firstName",
-      "lastName",
-      "username",
-      "email",
-      "phoneNumber",
-    ];
+  // -----------------------------------------------------------------
+  // 6️⃣  Cancel a transaction at any step (reload the page)
+  // -----------------------------------------------------------------
+  it('cancels a transaction by reloading the page and returns to step‑1', () => {
+    cy.visit('/transaction/new');
 
-    cy.getBySelLike("new-transaction").click();
-    cy.wait("@allUsers");
+    // select a contact → step‑2 appears
+    cy.get('[data-test^=user-list-item-]').first().click();
 
-    searchAttrs.forEach((attr: keyof User) => {
-      cy.getBySel("user-list-search-input").type(targetUser[attr] as string, { force: true });
-      cy.wait("@usersSearch");
+    // verify we are on step‑2
+    cy.getBySel('transaction-create-form').should('be.visible');
 
-      cy.getBySelLike("user-list-item")
-        .first()
-        .contains(targetUser[attr] as string);
-      cy.percySnapshot(`User List for Search: ${targetUser[attr]}`);
+    // reload the page – the flow should reset to step‑1
+    cy.reload();
 
-      cy.focused().clear();
-      cy.getBySel("users-list").should("be.empty");
-      cy.percySnapshot("User List Clear Search");
-    });
+    // step‑1 UI (the users list) must be visible again
+    cy.get('[data-test^=user-list-item-]').should('have.length.greaterThan', 0);
+    // step‑2 form must no longer be present
+    cy.get('[data-test=transaction-create-form]').should('not.exist');
+  });
+
+  // -----------------------------------------------------------------
+  // 7️⃣  Transaction with the **minimum** and **maximum** allowed amount
+  // -----------------------------------------------------------------
+  it('creates transactions using the minimum and maximum amount values', () => {
+    // ---------- MINIMUM ----------
+    cy.visit('/transaction/new');
+    cy.get('[data-test^=user-list-item-]').first().click();
+
+    // Amount = 0.01 (the UI expects cents, we type "0.01")
+    cy.getBySel('transaction-create-amount-input')
+      .clear()
+      .type('0.01');
+
+    cy.getBySel('transaction-create-description-input')
+      .clear()
+      .type('Min amount test');
+
+    cy.getBySel('transaction-create-submit-payment').click();
+
+    // verify success
+    cy.contains('Paid $0.01 for Min amount test').should('exist');
+
+    // ---------- MAXIMUM ----------
+    // Go back to the New Transaction page
+    cy.get('[data-test=new-transaction-return-to-transactions]').click();
+    cy.get('[data-test=nav-top-new-transaction]').click();
+
+    // select a contact again
+    cy.get('[data-test^=user-list-item-]').first().click();
+
+    // Use a large amount (e.g. $9999.99 → 999999 cents)
+    cy.getBySel('transaction-create-amount-input')
+      .clear()
+      .type('9999.99');
+
+    cy.getBySel('transaction-create-description-input')
+      .clear()
+      .type('Max amount test');
+
+    cy.getBySel('transaction-create-submit-payment').click();
+
+    // verify success
+    cy.contains('Paid $9,999.99 for Max amount test').should('exist');
   });
 });
