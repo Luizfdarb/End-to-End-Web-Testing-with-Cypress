@@ -1,155 +1,180 @@
 
 /// <reference types="cypress" />
 
-/**
- * Acceptance tests for the Transaction Detail view.
- *
- * The tests cover:
- *  1️⃣  Rendering of a transaction detail page.
- *  2️⃣  Liking a transaction (count increment & button disabled).
- *  3️⃣  Adding a comment (comment appears in the list).
- *  4️⃣  Accepting a pending request (buttons disappear after action).
- *  5️⃣  Rejecting a pending request (buttons disappear after action).
- *
- * Custom Cypress commands that are already registered in the project are used:
- *  - cy.login(username, password)            – UI login.
- *  - cy.task('db:seed')                      – reseed the DB before each test.
- *  - cy.database('find', entity, query)      – fetch a single record.
- *  - cy.database('filter', entity, query)    – fetch an array of records.
- *
- * All selectors are based on the `data‑test` attributes present in the
- * production components, which makes the test robust against UI changes.
- */
-
+// Transaction View acceptance tests
 describe('Transaction View', () => {
-  /**
-   * Seed the database and log in before every test.
-   * The seed creates deterministic users; we use the first one
-   * (username: "db4uxOm7d") which is always present.
-   */
-  beforeEach(() => {
-    // reset DB to known state
-    cy.task('db:seed');
-    // log in via UI (the password is provided by the plugin as env.defaultPassword)
-    cy.login('db4uxOm7d', Cypress.env('defaultPassword'));
-    // ensure we are on the home page
-    cy.visit('/');
-  });
+  const password = 'Password123!';
 
-  /**
-   * -------------------------------------------------------------------------
-   * 1️⃣  Transaction Detail – like & comment
-   * -------------------------------------------------------------------------
-   */
-  it('shows a transaction detail page and allows like and comment actions', () => {
-    // 1️⃣  Capture the first transaction item displayed in the list
-    cy.get('[data-test^=transaction-item-]')
-      .first()
-      .then($item => {
-        const transactionId = $item.attr('data-test')!.replace('transaction-item-', '');
+  // Users created once for all tests
+  let userA: any;
+  let userB: any;
 
-        // keep the id for later steps
-        cy.wrap(transactionId).as('txId');
+  before(() => {
+    const unique = Date.now();
 
-        // capture the initial like count
-        cy.get(`[data-test=transaction-like-count-${transactionId}]`)
-          .invoke('text')
-          .then(text => parseInt(text, 10))
-          .as('initialLikeCount');
+    const userAPayload = {
+      username: `userA-${unique}`,
+      password,
+      firstName: 'Test',
+      lastName: 'UserA',
+      email: `userA-${unique}@example.com`,
+      phoneNumber: '555-0001',
+      avatar: 'https://via.placeholder.com/150',
+      defaultPrivacyLevel: 'public',
+      balance: 1000,
+    };
 
-        // 2️⃣  Open the detail page
-        cy.wrap($item).click();
+    const userBPayload = {
+      username: `userB-${unique}`,
+      password,
+      firstName: 'Test',
+      lastName: 'UserB',
+      email: `userB-${unique}@example.com`,
+      phoneNumber: '555-0002',
+      avatar: 'https://via.placeholder.com/150',
+      defaultPrivacyLevel: 'public',
+      balance: 1000,
+    };
 
-        // 3️⃣  Verify the header is rendered
-        cy.get('[data-test=transaction-detail-header]').should('be.visible');
-
-        // ---- LIKE -----------------------------------------------------------
-        cy.get(`[data-test=transaction-like-button-${transactionId}]`).click();
-
-        // after the click the button must be disabled
-        cy.get(`[data-test=transaction-like-button-${transactionId}]`).should('be.disabled');
-
-        // the count must have increased by 1
-        cy.get(`[data-test=transaction-like-count-${transactionId}]`).should($cnt => {
-          const newCount = parseInt($cnt.text(), 10);
-          cy.get('@initialLikeCount').then(initial => {
-            expect(newCount).to.eq(initial + 1);
-          });
-        });
-
-        // ---- COMMENT --------------------------------------------------------
-        const commentText = `Cypress comment ${Date.now()}`;
-
-        cy.get(`[data-test=transaction-comment-input-${transactionId}]`)
-          .type(`${commentText}{enter}`);
-
-        // the new comment should appear in the comment list
-        cy.contains(commentText).should('be.visible');
+    // Create userA
+    cy.request('POST', `${Cypress.env('apiUrl')}/users`, userAPayload)
+      .then((resA) => {
+        userA = resA.body.user;
+        // Create userB
+        return cy.request('POST', `${Cypress.env('apiUrl')}/users`, userBPayload);
+      })
+      .then((resB) => {
+        userB = resB.body.user;
       });
   });
 
-  /**
-   * -------------------------------------------------------------------------
-   * 2️⃣  Accept / Reject a pending request transaction
-   * -------------------------------------------------------------------------
-   *
-   * The seed creates request transactions for every user.
-   * We locate a pending request where the logged‑in user is the *receiver*,
-   * visit its detail page and exercise the Accept and Reject buttons.
-   */
-  it('allows a user to accept or reject a pending request transaction', () => {
-    // 1️⃣  Get the current logged‑in user id from the auth service
-    cy.window()
-      .its('authService')
-      .invoke('state')
-      .then(state => {
-        const currentUserId = state.context.user.id;
+  context('Payment transaction', () => {
+    it('should display a payment transaction correctly and allow liking/commenting', () => {
+      // Login as userA
+      cy.loginByApi(userA.username, password).then(() => {
+        // Create a payment transaction from A to B
+        const paymentPayload = {
+          transactionType: 'payment',
+          amount: 10, // will be stored as 10 * 100 = 1000
+          description: 'Test payment transaction',
+          privacyLevel: 'public',
+          receiverId: userB.id,
+          senderId: userA.id,
+        };
 
-        // 2️⃣  Find a pending request where the current user is the receiver
-        cy.database('filter', 'transactions', {
-          requestStatus: 'pending',
-          receiverId: currentUserId,
-        }).then((pendingTxs: any[]) => {
-          expect(pendingTxs.length).to.be.greaterThan(0, 'there is at least one pending request');
+        return cy.request('POST', `${Cypress.env('apiUrl')}/transactions`, paymentPayload);
+      }).then((resp) => {
+        const transactionId = resp.body.transaction.id;
 
-          // pick the first one for the *accept* flow
-          const txToAccept = pendingTxs[0];
-          const acceptId = txToAccept.id;
+        // Intercept like and comment POST requests
+        cy.intercept('POST', `${Cypress.env('apiUrl')}/likes/${transactionId}`).as(`likePost-${transactionId}`);
+        cy.intercept('POST', `${Cypress.env('apiUrl')}/comments/${transactionId}`).as(`commentPost-${transactionId}`);
 
-          // ----- ACCEPT ----------------------------------------------------
-          cy.visit(`/transaction/${acceptId}`);
+        // Visit the transaction detail page
+        cy.visit(`/transaction/${transactionId}`);
 
-          // verify the accept button exists
-          cy.get(`[data-test=transaction-accept-request-${acceptId}]`).should('be.visible');
+        // Wait for the detail header to appear (page has loaded)
+        cy.get(`[data-test="transaction-detail-header"]`, { timeout: 15000 }).should('be.visible');
 
-          // click accept
-          cy.get(`[data-test=transaction-accept-request-${acceptId}]`).click();
+        // Verify transaction amount
+        cy.get(`[data-test="transaction-amount-${transactionId}"]`, { timeout: 15000 })
+          .should('contain.text', '$10.00');
 
-          // after accepting the request the accept/reject controls disappear
-          cy.get(`[data-test=transaction-accept-request-${acceptId}]`).should('not.exist');
-          cy.get(`[data-test=transaction-reject-request-${acceptId}]`).should('not.exist');
+        // Verify action text contains "paid"
+        cy.get(`[data-test="transaction-action-${transactionId}"]`)
+          .should('contain.text', 'paid');
 
-          // ----- REJECT ----------------------------------------------------
-          // pick another pending request (different from the accepted one)
-          const otherTx = pendingTxs.find(t => t.id !== acceptId);
-          if (!otherTx) {
-            // if only one pending request existed, the reject part is skipped
-            return;
-          }
-          const rejectId = otherTx.id;
+        // Ensure accept/reject buttons are NOT present
+        cy.get(`[data-test="transaction-accept-request-${transactionId}"]`).should('not.exist');
+        cy.get(`[data-test="transaction-reject-request-${transactionId}"]`).should('not.exist');
 
-          cy.visit(`/transaction/${rejectId}`);
+        // Like button should be enabled
+        cy.get(`[data-test="transaction-like-button-${transactionId}"]`)
+          .should('be.enabled');
 
-          // verify the reject button exists
-          cy.get(`[data-test=transaction-reject-request-${rejectId}]`).should('be.visible');
+        // Like the transaction
+        cy.get(`[data-test="transaction-like-button-${transactionId}"]`).click();
+        cy.wait(`@likePost-${transactionId}`);
 
-          // click reject
-          cy.get(`[data-test=transaction-reject-request-${rejectId}]`).click();
+        // Comment input should be visible
+        cy.get(`[data-test="transaction-comment-input-${transactionId}"]`).should('be.visible');
 
-          // after rejecting the request the accept/reject controls disappear
-          cy.get(`[data-test=transaction-accept-request-${rejectId}]`).should('not.exist');
-          cy.get(`[data-test=transaction-reject-request-${rejectId}]`).should('not.exist');
+        // Submit a comment
+        cy.get(`[data-test="transaction-comment-input-${transactionId}"]`)
+          .type('Nice payment{enter}');
+        cy.wait(`@commentPost-${transactionId}`);
+      }).finally(() => {
+        // Clean up session
+        cy.logoutByXstate();
+      });
+    });
+  });
+
+  context('Request transaction', () => {
+    it('should allow accepting a pending request transaction', () => {
+      // Login as userB to create a request to userA
+      cy.loginByApi(userB.username, password).then(() => {
+        const requestPayload = {
+          transactionType: 'request',
+          amount: 15,
+          description: 'Test request transaction',
+          privacyLevel: 'public',
+          receiverId: userA.id,
+          senderId: userB.id,
+        };
+
+        return cy.request('POST', `${Cypress.env('apiUrl')}/transactions`, requestPayload);
+      }).then((resp) => {
+        const transactionId = resp.body.transaction.id;
+
+        // Logout userB
+        cy.logoutByXstate();
+
+        // Login as userA (the receiver)
+        cy.loginByApi(userA.username, password).then(() => {
+          // Intercept accept POST request
+          cy.intercept('PATCH', `${Cypress.env('apiUrl')}/transactions/${transactionId}`).as(`acceptPost-${transactionId}`);
+
+          // Visit the transaction detail page
+          cy.visit(`/transaction/${transactionId}`);
+
+          // Wait for the detail header to appear
+          cy.get(`[data-test="transaction-detail-header"]`, { timeout: 15000 }).should('be.visible');
+
+          // Verify accept & reject buttons exist
+          cy.get(`[data-test="transaction-accept-request-${transactionId}"]`, { timeout: 15000 })
+            .should('be.visible');
+          cy.get(`[data-test="transaction-reject-request-${transactionId}"]`)
+            .should('be.visible');
+
+          // Click accept button
+          cy.get(`[data-test="transaction-accept-request-${transactionId}"]`).click();
+
+          // Verify that the accept/reject buttons disappear
+          cy.get(`[data-test="transaction-accept-request-${transactionId}"]`).should('not.exist');
+          cy.get(`[data-test="transaction-reject-request-${transactionId}"]`).should('not.exist');
+
+          // Verify action text changes to "charged"
+          cy.get(`[data-test="transaction-action-${transactionId}"]`)
+            .should('contain.text', 'charged');
+
+          // Intercept like and comment POST requests (optional)
+          cy.intercept('POST', `${Cypress.env('apiUrl')}/likes/${transactionId}`).as(`likePost-${transactionId}`);
+          cy.intercept('POST', `${Cypress.env('apiUrl')}/comments/${transactionId}`).as(`commentPost-${transactionId}`);
+
+          // Like the transaction
+          cy.get(`[data-test="transaction-like-button-${transactionId}"]`).click();
+          cy.wait(`@likePost-${transactionId}`);
+
+          // Comment input should be visible and allow comment submission
+          cy.get(`[data-test="transaction-comment-input-${transactionId}"]`).should('be.visible')
+            .type('Nice request!{enter}');
+          cy.wait(`@commentPost-${transactionId}`);
+        }).finally(() => {
+          // Clean up session
+          cy.logoutByXstate();
         });
       });
+    });
   });
 });

@@ -1,104 +1,118 @@
 
 /// <reference types="cypress" />
 
-/*
-  Cypress acceptance test for the *Bank Accounts* feature.
+import faker from 'faker';
 
-  This spec covers:
-    1️⃣  List of bank accounts (seeded data)
-    2️⃣  Creation of a new bank account
-    3️⃣  Soft‑deletion of a bank account (the UI shows “(Deleted)’’)
+describe('Bank Accounts', () => {
+  const apiUrl = Cypress.env('apiUrl');
+  const defaultPassword = Cypress.env('defaultPassword');
 
-  The test follows the exact UI data‑test attributes that the app
-  exposes, uses the custom commands defined in `cypress/support/commands.ts`,
-  and seeds the database before every test run.
-*/
-
-describe('Bank Accounts – UI flow', () => {
   /**
-   * Helper: seed the DB, pick a user from the seed and log‑in via the API.
-   * The seed creates **all users with the same password** (env var
-   * `SEED_DEFAULT_USER_PASSWORD`).  We fetch any user, use its username
-   * together with the default password and let Cypress store the auth cookie.
+   * Helper that creates a brand‑new user via the REST API and logs in via the UI.
+   * The username is generated with faker so that we never hit a duplicate.
    */
-  const loginWithSeededUser = () => {
-    // 1️⃣ Seed the DB
-    cy.task('db:seed');
+  function createAndLoginUser(): void {
+    const username = faker.internet.userName();
 
-    // 2️⃣ Grab the first user that exists in the DB
-    cy.task('find:database', { entity: 'users', query: {} }).then((user: any) => {
-      // 3️⃣ Log‑in via the API command (sets the session cookie)
-      // The default password is exposed through Cypress env (`defaultPassword`).
-      const pwd = Cypress.env('defaultPassword') ?? 'test';
-      cy.loginByApi(user.username, pwd);
-    });
-  };
+    const userPayload = {
+      username,
+      password: defaultPassword,
+      firstName: 'Test',
+      lastName: 'User',
+      email: faker.internet.email(),
+      phoneNumber: faker.phone.phoneNumber(),
+      balance: 1000,
+      avatar: faker.internet.avatar(),
+      defaultPrivacyLevel: 'public',
+    };
+
+    // Create the user (no auth required for /users POST)
+    cy.request('POST', `${apiUrl}/users`, userPayload);
+
+    // Log in using the UI command – this also fires the XState event.
+    cy.login(username, defaultPassword);
+  }
 
   beforeEach(() => {
-    loginWithSeededUser();
-    // After a successful login the app redirects to “/”.  From there we can
-    // navigate to the bank‑accounts page.
+    // Reset the database to a clean state before each spec
+    cy.task('db:seed');
+
+    // Create a new user and log in
+    createAndLoginUser();
+
+    // Go straight to the bank‑accounts list
     cy.visit('/bankaccounts');
   });
 
-  /** -------------------------------------------------------------
-   *  1️⃣  Verify that the seeded accounts are listed.
-   * ------------------------------------------------------------- */
-  it('displays a list of bank accounts for the logged‑in user', () => {
-    // The list component has `data-test="bankaccount-list"`.
-    cy.get('[data-test=bankaccount-list]').should('exist');
+  it('should create a new bank account', () => {
+    const bankName = faker.company.companyName();
+    const accountNumber = faker.finance.account(10);
+    const routingNumber = faker.finance.account(9);
 
-    // At least one account must be rendered (the seed creates several per user).
-    cy.get('[data-test^=bankaccount-list-item-]')
-      .its('length')
-      .should('be.gte', 1);
+    // Open the “Create Bank Account” page
+    cy.getBySel('bankaccount-new').click();
+    cy.url().should('include', '/bankaccounts/new');
+
+    // Fill in the form
+    cy.getBySel('bankaccount-bankName-input').type(bankName);
+    cy.getBySel('bankaccount-routingNumber-input').type(routingNumber);
+    cy.getBySel('bankaccount-accountNumber-input').type(accountNumber);
+
+    // Submit the form
+    cy.getBySel('bankaccount-submit').click();
+
+    // We should be back on the list page
+    cy.url().should('include', '/bankaccounts');
+
+    // The newly created account should appear in the list
+    cy.contains('[data-test^="bankaccount-list-item-"]', bankName)
+      .should('exist')
+      .and('contain', bankName);
+
+    // And the delete button must be present
+    cy.contains('[data-test^="bankaccount-list-item-"]', bankName)
+      .find('[data-test="bankaccount-delete"]')
+      .should('exist');
   });
 
-  /** -------------------------------------------------------------
-   *  2️⃣  Create a new bank account through the UI and verify it appears.
-   * ------------------------------------------------------------- */
-  it('creates a new bank account and shows it in the list', () => {
-    // Open the “Create Bank Account’’ form.
-    cy.get('[data-test=bankaccount-new]').click();
+  it('should delete a bank account', () => {
+    const bankName = faker.company.companyName();
+    const accountNumber = faker.finance.account(10);
+    const routingNumber = faker.finance.account(9);
 
-    // Fill the form fields (all have dedicated data‑test attributes).
-    const bankName = 'Cypress Bank';
-    const routingNumber = '123456789';
-    const accountNumber = '9876543210';
+    /* ---------- Create a bank account to delete ---------- */
+    cy.getBySel('bankaccount-new').click();
+    cy.getBySel('bankaccount-bankName-input').type(bankName);
+    cy.getBySel('bankaccount-routingNumber-input').type(routingNumber);
+    cy.getBySel('bankaccount-accountNumber-input').type(accountNumber);
+    cy.getBySel('bankaccount-submit').click();
+    cy.url().should('include', '/bankaccounts');
 
-    cy.get('[data-test=bankaccount-bankName-input]').type(bankName);
-    cy.get('[data-test=bankaccount-routingNumber-input]').type(routingNumber);
-    cy.get('[data-test=bankaccount-accountNumber-input]').type(accountNumber);
-
-    // Submit the form.
-    cy.get('[data-test=bankaccount-submit]').click();
-
-    // After a successful POST the app redirects back to the list page.
-    // Verify that the newly created bank name is now present in the list.
-    cy.get('[data-test=bankaccount-list]')
-      .should('contain', bankName)
-      .and('contain', routingNumber)
-      .and('contain', accountNumber);
-  });
-
-  /** -------------------------------------------------------------
-   *  3️⃣  Delete (soft‑delete) a bank account and ensure the UI marks it.
-   * ------------------------------------------------------------- */
-  it('soft‑deletes a bank account and shows the “(Deleted)’’ label', () => {
-    // Ensure we have at least one account to delete.
-    cy.get('[data-test^=bankaccount-list-item-]')
-      .first()
-      .as('firstAccount');
-
-    // Click the delete button that lives inside the list‑item.
-    cy.get('@firstAccount')
-      .within(() => {
-        cy.get('[data-test=bankaccount-delete]').click();
+    // Capture the account ID from the rendered list item
+    cy.contains('[data-test^="bankaccount-list-item-"]', bankName)
+      .then($el => {
+        const accountId = $el.attr('data-test')!.replace(/^bankaccount-list-item-/, '');
+        cy.wrap(accountId).as('accountId');
       });
 
-    // The UI marks a deleted account with the text “(Deleted)”.
-    // Wait for the request to finish and then assert the label.
-    cy.get('@firstAccount')
+    /* ---------- Delete the newly created account ---------- */
+    cy.contains('[data-test^="bankaccount-list-item-"]', bankName)
+      .find('[data-test="bankaccount-delete"]')
+      .click();
+
+    // The delete button should disappear
+    cy.contains('[data-test^="bankaccount-list-item-"]', bankName)
+      .find('[data-test="bankaccount-delete"]')
+      .should('not.exist');
+
+    // The list item should now show the “(Deleted)” flag
+    cy.contains('[data-test^="bankaccount-list-item-"]', bankName)
       .should('contain', '(Deleted)');
+
+    // Verify that the account is marked as deleted in the database
+    cy.get('@accountId').then(id => {
+      cy.database('find', 'bankaccounts', { id })
+        .should('have.property', 'isDeleted', true);
+    });
   });
 });

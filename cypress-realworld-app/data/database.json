@@ -74,6 +74,36 @@
       "balance": 75369,
       "createdAt": "2020-02-11T21:26:46.510Z",
       "modifiedAt": "2020-05-21T15:15:33.944Z"
+    },
+    {
+      "id": "Ra_kYGD_I",
+      "uuid": "66e8ea10-f5ab-48bd-8444-2c7fb0f0dec9",
+      "firstName": "Test",
+      "lastName": "UserA",
+      "username": "userA-1764197844515",
+      "password": "$2a$10$kvCIqJkZN2ucTAlfo8eCwOz9G/8gn10DIgFWc/PGCgGVHJqVDX1OO",
+      "email": "userA-1764197844515@example.com",
+      "phoneNumber": "555-0001",
+      "balance": "1000",
+      "avatar": "https://via.placeholder.com/150",
+      "defaultPrivacyLevel": "public",
+      "createdAt": "2025-11-26T22:57:24.633Z",
+      "modifiedAt": "2025-11-26T22:57:24.633Z"
+    },
+    {
+      "id": "PtoBCq3_EH",
+      "uuid": "23c121a2-6419-4626-965b-6adadbab96e8",
+      "firstName": "Test",
+      "lastName": "UserB",
+      "username": "userB-1764197844515",
+      "password": "$2a$10$yDEOwKXV.fMRGIv4r4vLuejgTN2mh0Oa36mtwgntgpvdZ2iXLULbi",
+      "email": "userB-1764197844515@example.com",
+      "phoneNumber": "555-0002",
+      "balance": "1000",
+      "avatar": "https://via.placeholder.com/150",
+      "defaultPrivacyLevel": "public",
+      "createdAt": "2025-11-26T22:57:24.769Z",
+      "modifiedAt": "2025-11-26T22:57:24.769Z"
     }
   ],
   "contacts": [
@@ -9855,6 +9885,19 @@
       "requestResolvedAt": "",
       "createdAt": "2019-06-27T22:24:04.794Z",
       "modifiedAt": "2020-05-21T04:58:44.494Z"
+    },
+    {
+      "id": "UiUGX6LDV",
+      "uuid": "d805c161-f059-4959-a8df-0a64bf2ad5ae",
+      "amount": 1500,
+      "description": "Test request transaction",
+      "receiverId": "Ra_kYGD_I",
+      "senderId": "PtoBCq3_EH",
+      "privacyLevel": "public",
+      "status": "pending",
+      "requestStatus": "pending",
+      "createdAt": "2025-11-26T22:57:25.301Z",
+      "modifiedAt": "2025-11-26T22:57:25.301Z"
     }
   ],
   "likes": [
@@ -10431,6 +10474,16 @@
       "isRead": false,
       "createdAt": "2019-10-19T20:50:49.292Z",
       "modifiedAt": "2020-05-21T21:00:50.192Z"
+    },
+    {
+      "id": "SrL_GLmkAd",
+      "uuid": "5a01b809-fee5-4670-b5e0-0c29f7bdbec2",
+      "userId": "Ra_kYGD_I",
+      "transactionId": "UiUGX6LDV",
+      "status": "requested",
+      "isRead": false,
+      "createdAt": "2025-11-26T22:57:25.305Z",
+      "modifiedAt": "2025-11-26T22:57:25.305Z"
     }
   ],
   "banktransfers": [

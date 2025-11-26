@@ -1,85 +1,158 @@
 
-// cypress/tests/ui/user-settings.spec.ts
-
-/* eslint-disable cypress/no-unnecessary-waiting */
 /// <reference types="cypress" />
 
 describe('User Settings', () => {
-  // -------------------------------------------------------------------------
-  // Preparação antes de cada teste
-  // -------------------------------------------------------------------------
+  let user: any;
+
+  // ------------------------------------------------------------
+  // 1️⃣  Before every test we fetch a user from the DB and log in
+  // ------------------------------------------------------------
   beforeEach(() => {
-    // 1️⃣  Busca um usuário aleatório na seed
-    cy.task('find:database', { entity: 'users', query: {} }).as('seedUser');
-
-    // 2️⃣  Faz login via API usando o usuário encontrado
-    cy.get('@seedUser').then((user: any) => {
-      cy.loginByApi(user.username).then(() => {
-        // 3️⃣  Navega para a tela de configuração do usuário
-        cy.visit('/user/settings');
-      });
-    });
+    // Get all users from the backend DB
+    cy.database('filter', 'users', {})
+      .then(users => {
+        // Pick the first user (seed data guarantees at least one user)
+        user = users[0];
+      })
+      // Log in via the API – this bypasses the UI and keeps the test fast
+      .then(() => cy.loginByApi(user.username, Cypress.env('defaultPassword')))
+      // Once authenticated, navigate to the User Settings page
+      .then(() => cy.visit('/user/settings'));
   });
 
-  // -------------------------------------------------------------------------
-  // Verifica se o formulário exibe os valores atuais do usuário
-  // -------------------------------------------------------------------------
-  it('displays current user data in the form fields', () => {
-    cy.get('@seedUser').then((user: any) => {
-      // Cada campo tem um data-test específico, verifique o valor
-      cy.getBySel('user-settings-firstName-input')
-        .should('have.value', user.firstName);
-      cy.getBySel('user-settings-lastName-input')
-        .should('have.value', user.lastName);
-      cy.getBySel('user-settings-email-input')
-        .should('have.value', user.email);
-      cy.getBySel('user-settings-phoneNumber-input')
-        .should('have.value', user.phoneNumber);
-    });
+  // ------------------------------------------------------------
+  // 2️⃣  Verify that the form is pre‑filled with the current user data
+  // ------------------------------------------------------------
+  it('should display the user settings form with prefilled values', () => {
+    cy.getBySel('user-settings-form').should('exist');
+
+    cy.getBySel('user-settings-firstName-input')
+      .should('have.value', user.firstName);
+    cy.getBySel('user-settings-lastName-input')
+      .should('have.value', user.lastName);
+    cy.getBySel('user-settings-email-input')
+      .should('have.value', user.email);
+    cy.getBySel('user-settings-phoneNumber-input')
+      .should('have.value', user.phoneNumber);
+    cy.getBySel('user-settings-defaultPrivacyLevel-input')
+      .should('have.value', user.defaultPrivacyLevel);
   });
 
-  // -------------------------------------------------------------------------
-  // Atualiza informações do perfil e verifica a persistência
-  // -------------------------------------------------------------------------
-  it('updates user profile and reflects the changes in the UI', () => {
-    cy.get('@seedUser').then((user: any) => {
-      const newFirstName = `${user.firstName} Updated`;
-      const newLastName  = `${user.lastName} Updated`;
-      const newEmail     = `updated-${user.email}`;
+  // ------------------------------------------------------------
+  // 3️⃣  Update the user profile – a successful flow
+  // ------------------------------------------------------------
+  it('should update user profile successfully', () => {
+    // Intercept the PATCH request so we can assert its response
+    cy.intercept(
+      'PATCH',
+      `${Cypress.env('apiUrl')}/users/*`
+    ).as('updateUser');
 
-      // Intercepta a chamada PATCH que o formulário envia ao backend
-      cy.server();
-      cy.route('PATCH', '/users/*').as('updateUser');
+    // New values – all unique to avoid conflicts with existing data
+    const updated = {
+      firstName: `Updated${user.id}`,
+      lastName: `Last${user.id}`,
+      email: `updated-${user.id}@example.com`,
+      phoneNumber: `555${user.id.slice(0, 4)}`,
+      defaultPrivacyLevel: 'private',
+    };
 
-      // Preenche o formulário com novos valores
-      cy.getBySel('user-settings-firstName-input')
-        .clear()
-        .type(newFirstName);
-      cy.getBySel('user-settings-lastName-input')
-        .clear()
-        .type(newLastName);
-      cy.getBySel('user-settings-email-input')
-        .clear()
-        .type(newEmail);
-      // O telefone não será alterado aqui, apenas deixamos como está
+    cy.getBySel('user-settings-firstName-input')
+      .clear()
+      .type(updated.firstName);
+    cy.getBySel('user-settings-lastName-input')
+      .clear()
+      .type(updated.lastName);
+    cy.getBySel('user-settings-email-input')
+      .clear()
+      .type(updated.email);
+    cy.getBySel('user-settings-phoneNumber-input')
+      .clear()
+      .type(updated.phoneNumber);
+    cy.getBySel('user-settings-defaultPrivacyLevel-input')
+      .clear()
+      .type(updated.defaultPrivacyLevel);
 
-      // Submete o formulário
-      cy.getBySel('user-settings-submit').click();
+    // Submit the form
+    cy.getBySel('user-settings-submit').click();
 
-      // Aguarda a requisição PATCH e verifica sucesso
-      cy.wait('@updateUser').its('status').should('eq', 200);
+    // Wait for the PATCH request and verify a 204 response
+    cy.wait('@updateUser').its('response.statusCode').should('eq', 204);
 
-      // Depois da atualização, o drawer exibe o nome completo do usuário
-      // Abra o drawer (o toggle está presente tanto em mobile quanto desktop)
-      cy.getBySel('sidenav-toggle').click();
+    // The form should re‑render with the new values – assert them
+    cy.getBySel('user-settings-firstName-input')
+      .should('have.value', updated.firstName);
+    cy.getBySel('user-settings-lastName-input')
+      .should('have.value', updated.lastName);
+    cy.getBySel('user-settings-email-input')
+      .should('have.value', updated.email);
+    cy.getBySel('user-settings-phoneNumber-input')
+      .should('have.value', updated.phoneNumber);
+    cy.getBySel('user-settings-defaultPrivacyLevel-input')
+      .should('have.value', updated.defaultPrivacyLevel);
+  });
 
-      // O nome exibido deve conter o novo primeiro nome e sobrenome
-      cy.getBySel('sidenav-user-full-name')
-        .should('contain', newFirstName)
-        .and('contain', newLastName);
+  // ------------------------------------------------------------
+  // 4️⃣  Validation – empty first name
+  // ------------------------------------------------------------
+  it('should show a validation error when the first name is empty', () => {
+    cy.getBySel('user-settings-firstName-input')
+      .clear()
+      .type(''); // leave it empty
 
-      // Fecha o drawer para deixar o estado limpo
-      cy.getBySel('sidenav-toggle').click();
-    });
+    cy.getBySel('user-settings-submit').click();
+
+    cy.getBySel('user-settings-firstName-input')
+      .parent()
+      .find('.MuiFormHelperText-root')
+      .should('contain.text', 'Enter a first name');
+  });
+
+  // ------------------------------------------------------------
+  // 5️⃣  Validation – invalid email
+  // ------------------------------------------------------------
+  it('should show a validation error for an invalid email address', () => {
+    cy.getBySel('user-settings-email-input')
+      .clear()
+      .type('invalid-email');
+
+    cy.getBySel('user-settings-submit').click();
+
+    cy.getBySel('user-settings-email-input')
+      .parent()
+      .find('.MuiFormHelperText-root')
+      .should('contain.text', 'Must contain a valid email address');
+  });
+
+  // ------------------------------------------------------------
+  // 6️⃣  Validation – invalid phone number
+  // ------------------------------------------------------------
+  it('should show a validation error for an invalid phone number', () => {
+    cy.getBySel('user-settings-phoneNumber-input')
+      .clear()
+      .type('abc');
+
+    cy.getBySel('user-settings-submit').click();
+
+    cy.getBySel('user-settings-phoneNumber-input')
+      .parent()
+      .find('.MuiFormHelperText-root')
+      .should('contain.text', 'Phone number is not valid');
+  });
+
+  // ------------------------------------------------------------
+  // 7️⃣  Validation – invalid default privacy level
+  // ------------------------------------------------------------
+  it('should show a validation error for an invalid default privacy level', () => {
+    cy.getBySel('user-settings-defaultPrivacyLevel-input')
+      .clear()
+      .type('invalid');
+
+    cy.getBySel('user-settings-submit').click();
+
+    cy.getBySel('user-settings-defaultPrivacyLevel-input')
+      .parent()
+      .find('.MuiFormHelperText-root')
+      .should('contain.text', 'must be one of');
   });
 });

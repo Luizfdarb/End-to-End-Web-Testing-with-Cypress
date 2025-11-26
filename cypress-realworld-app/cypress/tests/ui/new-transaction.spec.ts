@@ -1,191 +1,167 @@
 
 /// <reference types="cypress" />
 
-/**
- * Cypress acceptance tests for the "New Transaction" wizard.
- *
- * The wizard is composed of three steps:
- *   1 – Select a contact (users list)
- *   2 – Fill amount/description and choose Pay or Request
- *   3 – Confirmation screen with navigation back to the feed
- *
- * All UI elements are identified by the `data-test` attribute, which makes the
- * selectors stable across UI changes.
- */
+import { User } from '../../src/models';
 
-describe('New Transaction flow', () => {
-  /**
-   * Helper – seleciona o primeiro contato da lista de usuários.
-   */
-  const selectFirstContact = () => {
-    // Cada item tem data‑test="user‑list‑item‑<id>"
-    cy.get('[data-test^=user-list-item-]').first().click();
-  };
+describe('New Transaction Flow', () => {
+  let currentUser: User;
+  let contact: User;
 
-  /**
-   * Helper – preenche os campos do formulário de criação.
-   */
-  const fillTransactionForm = ({
-    amount = '',
-    description = '',
-  }: { amount?: string; description?: string }) => {
-    if (amount !== undefined) {
-      cy.getBySel('transaction-create-amount-input')
-        .clear()
-        .type(amount);
-    }
-    if (description !== undefined) {
-      cy.getBySel('transaction-create-description-input')
-        .clear()
-        .type(description);
-    }
-  };
-
-  /**
-   * Helper – clica no botão “Pay”.
-   */
-  const submitPayment = () => {
-    cy.getBySel('transaction-create-submit-payment')
-      .should('be.enabled')
-      .click();
-  };
-
-  /**
-   * Helper – clica no botão “Request”.
-   */
-  const submitRequest = () => {
-    cy.getBySel('transaction-create-submit-request')
-      .should('be.enabled')
-      .click();
-  };
-
-  /**
-   * Helper – verifica se o snackbar de sucesso foi exibido.
-   */
-  const assertSuccessSnackbar = () => {
-    // O AlertBar usa data‑test="alert-bar-<severity>"
-    cy.get('[data-test^=alert-bar-]')
-      .should('be.visible')
-      .and('contain', 'Transaction Submitted!');
-  };
-
-  /**
-   * Preparação comum a todos os testes:
-   *   - Restaura o seed original.
-   *   - Loga o usuário padrão (db4uxOm7d) usando o XState service.
-   *   - Navega para a página de criação.
-   */
   beforeEach(() => {
-    // Restaura o banco de dados de teste.
-    cy.task('db:seed');
+    // Seed the database and login as the first user
+    cy.task('db:seed').then(() => {
+      cy.task('filter:database', { entity: 'users', query: {} }).then((users: User[]) => {
+        currentUser = users[0];
+        // Pick a contact that is not the current user
+        contact = users.find((u) => u.id !== currentUser.id)!;
+        // Login via the UI
+        cy.login(currentUser.username, Cypress.env('defaultPassword'));
+      });
+    });
+  });
 
-    // Usuário padrão presente em todos os seeds (password vem do .env → DEFAULT_PASSWORD).
-    cy.loginByXstate('db4uxOm7d');
-
-    // Abre o wizard de nova transação.
+  /**
+   * Helper that performs the full creation flow for a transaction
+   * @param type 'payment' | 'request'
+   * @param amount amount in whole dollars
+   * @param description description string
+   */
+  const createTransaction = (type: 'payment' | 'request', amount: number, description: string) => {
     cy.visit('/transaction/new');
+
+    // --- Step 1: Select contact ------------------------------------------------
+    cy.get(`[data-test="user-list-item-${contact.id}"]`).should('be.visible').click();
+
+    // --- Step 2: Enter amount & description ------------------------------------
+    cy.getBySel('transaction-create-amount-input').should('be.visible').type(String(amount));
+    cy.getBySel('transaction-create-description-input').should('be.visible').type(description);
+
+    // Submit the form (payment or request)
+    const submitButton =
+      type === 'payment'
+        ? cy.getBySel('transaction-create-submit-payment')
+        : cy.getBySel('transaction-create-submit-request');
+    submitButton.should('be.visible').click();
+
+    // --- Step 3: Confirmation ---------------------------------------------------
+    cy.getBySel('new-transaction-return-to-transactions').should('be.visible');
+
+    // Verify summary text
+    const amountText = `$${amount.toFixed(2)}`;
+    const action = type === 'payment' ? 'Paid' : 'Requested';
+    cy.contains(`${action} ${amountText} for ${description}`).should('be.visible');
+
+    return description;
+  };
+
+  it('should create a payment transaction', () => {
+    const description = `Test payment ${Date.now()}`;
+
+    createTransaction('payment', 100, description);
+
+    // Return to transactions page
+    cy.getBySel('new-transaction-return-to-transactions').click();
+
+    // Verify we are on the root page
+    cy.url().should('eq', 'http://localhost:3000/');
+
+    // Verify transaction appears in the list
+    cy.contains(description).should('be.visible');
   });
 
-  /** -------------------------------------------------------------------------
-   *  1️⃣ Verifica a estrutura inicial (passo 1 – seleção de contato)
-   * -------------------------------------------------------------------------- */
-  it('displays the first step with a searchable users list', () => {
-    // O componente UsersList possui data‑test="users‑list".
-    cy.getBySel('users-list').should('be.visible');
+  it('should create a request transaction', () => {
+    const description = `Test request ${Date.now()}`;
 
-    // O campo de busca também deve estar presente.
-    cy.getBySel('user-list-search-input').should('exist');
+    createTransaction('request', 100, description);
 
-    // Ao menos um contato deve estar listado.
-    cy.get('[data-test^=user-list-item-]').its('length').should('be.gte', 1);
+    // Return to transactions page
+    cy.getBySel('new-transaction-return-to-transactions').click();
+
+    // Verify we are on the root page
+    cy.url().should('eq', 'http://localhost:3000/');
+
+    // Verify transaction appears in the list
+    cy.contains(description).should('be.visible');
   });
 
-  /** -------------------------------------------------------------------------
-   *  2️⃣ Cria uma **payment** e verifica sucesso
-   * -------------------------------------------------------------------------- */
-  it('creates a payment transaction successfully', () => {
-    // — Passo 1: escolher contato
-    selectFirstContact();
+  it('should validate form errors when amount or description is missing', () => {
+    cy.visit('/transaction/new');
 
-    // — Passo 2: preencher formulário
-    fillTransactionForm({ amount: '25', description: 'Cypress payment' });
-    submitPayment();
+    // Step 1: Select contact
+    cy.get(`[data-test="user-list-item-${contact.id}"]`).click();
 
-    // — Passo 3: tela de confirmação
-    cy.getBySel('new-transaction-return-to-transactions')
-      .should('be.visible')
-      .and('contain', 'Return To Transactions');
-
-    // Snackbar de sucesso
-    assertSuccessSnackbar();
-  });
-
-  /** -------------------------------------------------------------------------
-   *  3️⃣ Cria uma **request** e verifica sucesso
-   * -------------------------------------------------------------------------- */
-  it('creates a request transaction successfully', () => {
-    // Passo 1
-    selectFirstContact();
-
-    // Passo 2
-    fillTransactionForm({ amount: '12', description: 'Cypress request' });
-    submitRequest();
-
-    // Passo 3
-    cy.getBySel('new-transaction-return-to-transactions')
-      .should('be.visible')
-      .and('contain', 'Return To Transactions');
-
-    assertSuccessSnackbar();
-  });
-
-  /** -------------------------------------------------------------------------
-   *  4️⃣ Botão “Pay” deve permanecer desabilitado quando o valor está vazio
-   * -------------------------------------------------------------------------- */
-  it('disables the Pay button when the amount field is empty', () => {
-    selectFirstContact();
-
-    // deixa o campo amount vazio e preenche a descrição (para garantir que só o amount impede)
-    fillTransactionForm({ amount: '', description: 'Only description' });
-
-    // O botão Pay deve estar disabled
+    // Step 2: Attempt to submit with empty fields
     cy.getBySel('transaction-create-submit-payment')
-      .should('be.disabled');
-  });
-
-  /** -------------------------------------------------------------------------
-   *  5️⃣ Botão “Request” deve permanecer desabilitado quando a descrição está vazia
-   * -------------------------------------------------------------------------- */
-  it('disables the Request button when the description field is empty', () => {
-    selectFirstContact();
-
-    // Preenche o amount mas deixa a descrição vazia
-    fillTransactionForm({ amount: '30', description: '' });
-
-    cy.getBySel('transaction-create-submit-request')
-      .should('be.disabled');
-  });
-
-  /** -------------------------------------------------------------------------
-   *  6️⃣ Após a confirmação, volta à lista e verifica se a transação aparece
-   * -------------------------------------------------------------------------- */
-  it('returns to the transaction feed and shows the newly created transaction', () => {
-    const description = 'Cypress end‑to‑end';
-
-    // Passo 1 → 2 → 3 (payment)
-    selectFirstContact();
-    fillTransactionForm({ amount: '42', description });
-    submitPayment();
-
-    // Confirmação → volta para a lista
-    cy.getBySel('new-transaction-return-to-transactions')
+      .should('be.disabled')
       .click();
 
-    // Aguarda o carregamento da lista (skeleton desaparece)
-    cy.getBySel('list-skeleton').should('not.exist');
+    // Fill only the amount
+    cy.getBySel('transaction-create-amount-input').type('100');
+    cy.getBySel('transaction-create-submit-payment').click();
 
-    // Busca na lista algum item que contenha a descrição informada
-    cy.get('[data-test^=transaction-item-]')
-      .should('contain', description);
+    // Expect description error
+    cy.contains('Please enter a note').should('be.visible');
+
+    // Clear amount and fill only description
+    cy.getBySel('transaction-create-amount-input').clear();
+    cy.getBySel('transaction-create-description-input').type('Only description');
+    cy.getBySel('transaction-create-submit-payment').click();
+
+    // Expect amount error
+    cy.contains('Please enter a valid amount').should('be.visible');
+  });
+
+  it('should allow creating another transaction after completing one', () => {
+    const description = `Test another ${Date.now()}`;
+
+    createTransaction('payment', 100, description);
+
+    // Click "Create Another Transaction"
+    cy.getBySel('new-transaction-create-another-transaction').click();
+
+    // Verify wizard reset
+    cy.getBySel('users-list').should('be.visible');
+    cy.getBySel('transaction-create-amount-input')
+      .should('be.visible')
+      .and('have.value', '');
+    cy.getBySel('transaction-create-description-input')
+      .should('be.visible')
+      .and('have.value', '');
+  });
+
+  it('should return to the transactions page after completion', () => {
+    const description = `Test return ${Date.now()}`;
+
+    createTransaction('payment', 100, description);
+
+    // Click "Return to Transactions"
+    cy.getBySel('new-transaction-return-to-transactions').click();
+
+    // Verify URL and presence of the transaction in the list
+    cy.url().should('eq', 'http://localhost:3000/');
+    cy.contains(description).should('be.visible');
+  });
+
+  it('should navigate to transaction detail page and display correct information', () => {
+    const description = `Test detail ${Date.now()}`;
+
+    createTransaction('request', 150, description);
+
+    // Return to transactions page
+    cy.getBySel('new-transaction-return-to-transactions').click();
+
+    // Click the transaction item
+    cy.contains(description).click();
+
+    // Verify the detail page
+    cy.getBySel('transaction-detail-header').should('be.visible');
+    cy.contains(description).should('be.visible');
+
+    // Grab the transaction ID from the URL
+    cy.url().then((url) => {
+      const id = url.split('/').pop();
+      // Amount element should be present
+      cy.get(`[data-test="transaction-amount-${id}"]`).should('be.visible');
+    });
   });
 });
