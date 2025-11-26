@@ -13,6 +13,21 @@
 - **Arquivos com Falhas de Compilação**: 2 de 7 (28,6%)
 - **Categoria de Desempenho**: Intermediário
 
+## Tabela Resumo de Resultados
+
+| Arquivo de Teste | Testes Totais | Testes Passando | Taxa de Sucesso | Status | Principais Erros |
+|------------------|---------------|-----------------|-----------------|---------|------------------|
+| **auth.spec.ts** | 7 | 3 | **42,9%** | ✅ Funcional | Redirecionamento, validação |
+| **bankaccounts.spec.ts** | 4 | 0 | 0% | ❌ Runtime Error | `Cannot read property 'split' of undefined` |
+| **new-transaction.spec.ts** | 7 | 0 | 0% | ❌ Runtime Error | IDs hardcoded, navegação |
+| **notifications.spec.ts** | N/A | N/A | N/A | ❌ Compilação | Missing `@4tw/cypress-drag-drop` |
+| **transaction-feeds.spec.ts** | N/A | N/A | N/A | ❌ Compilação | Missing `@4tw/cypress-drag-drop` |
+| **transaction-view.spec.ts** | 6 | 2 | **33,3%** | ✅ Funcional | Seletores Material-UI, IDs hardcoded |
+| **user-settings.spec.ts** | 3 | 0 | 0% | ❌ Seletor Error | `[data-test="user-settings-form"]` não existe |
+| **TOTAL** | **27** | **5** | **18,5%** | - | - |
+
+*Nota: Total calculado apenas para arquivos que compilaram (27 testes de 5 arquivos)*
+
 ## Resultados Detalhados por Arquivo
 
 ### 1. auth.spec.ts ✅
