@@ -1,199 +1,214 @@
 
-import { formatAmount } from '../../src/utils/transactionUtils';
+import faker from 'faker';
 
-describe('Bank Accounts', () => {
-  // -------------------------------------------------------------------------
-  // Helper – creates a brand‑new user via the API and logs in.
-  // -------------------------------------------------------------------------
-  const createAndLoginUser = () => {
-    const timestamp = Date.now();
-    const username = `cypress_user_${timestamp}`;
-    const password = Cypress.env('defaultPassword') || 'Password123';
+const DEFAULT_PASSWORD = Cypress.env('defaultPassword') ?? 'password123';
 
-    // Minimal but complete user payload – matches backend expectations
-    const newUser = {
-      firstName: 'Cypress',
-      lastName: 'Tester',
-      username,
-      password,
-      email: `${username}@example.com`,
-      phoneNumber: '555-123-4567',
-      avatar: `https://avatars.dicebear.com/api/human/${username}.svg`,
-      defaultPrivacyLevel: 'public',
-      balance: 1000,
-    };
-
-    // 1️⃣  Seed the DB (clean state) and create the user
-    cy.task('db:seed');
-    cy.request('POST', `${Cypress.env('apiUrl')}/users`, newUser).then(() => {
-      // 2️⃣  Log‑in via API – this sets the session cookie for the UI
-      cy.loginByApi(username, password);
-    });
-  };
-
-  // -------------------------------------------------------------------------
-  // 1️⃣  CREATE – happy path
-  // -------------------------------------------------------------------------
-  it('should create a new bank account successfully', () => {
-    createAndLoginUser();
-
-    // Go to the Bank Accounts page
-    cy.visit('/bankaccounts');
-
-    // Open the “Create” form
-    cy.getBySel('bankaccount-new').click();
-
-    // Fill the form – use unique values to avoid false positives
-    const bankName = `Cypress Bank ${Date.now()}`;
-    const routingNumber = '123456789'; // exactly 9 digits (valid)
-    const accountNumber = '1234567890'; // 10 digits (valid)
-
-    cy.getBySel('bankaccount-bankName-input')
-      .type(bankName)
-      .should('have.value', bankName);
-
-    cy.getBySel('bankaccount-routingNumber-input')
-      .type(routingNumber)
-      .should('have.value', routingNumber);
-
-    cy.getBySel('bankaccount-accountNumber-input')
-      .type(accountNumber)
-      .should('have.value', accountNumber);
-
-    // Submit – the button becomes enabled only when the form is valid
-    cy.getBySel('bankaccount-submit')
-      .should('not.be.disabled')
-      .click();
-
-    // After creation we are redirected back to the list; verify the new item
-    cy.get(`[data-test^=bankaccount-list-item-]`).contains(bankName).should('exist');
+function signUpAndLogin(username: string, password = DEFAULT_PASSWORD) {
+  // 1️⃣ Create a new user via the API
+  cy.request('POST', '/signup', {
+    username,
+    password,
+    firstName: faker.name.firstName(),
+    lastName: faker.name.lastName(),
+    email: faker.internet.email(),
   });
 
-  // -------------------------------------------------------------------------
-  // 2️⃣  VALIDATION – detailed checks for each field
-  // -------------------------------------------------------------------------
-  it('should display detailed form validation errors', () => {
-    createAndLoginUser();
+  // 2️⃣ Log in using the UI helper (or API)
+  cy.loginByApi(username, password);
+}
 
+function createBankAccount(
+  bankName: string,
+  accountNumber: string,
+  routingNumber: string
+) {
+  cy.getBySel('bankaccount-bankName-input').clear().type(bankName);
+  cy.getBySel('bankaccount-accountNumber-input')
+    .clear()
+    .type(accountNumber);
+  cy.getBySel('bankaccount-routingNumber-input')
+    .clear()
+    .type(routingNumber);
+  cy.getBySel('bankaccount-submit').click();
+  cy.location('pathname').should('eq', '/bankaccounts');
+}
+
+/**
+ *  Helper to find a bank‑account list item by its bankName
+ *  Returns the list item DOM node
+ */
+function findAccountItem(name: string) {
+  return cy
+    .get('[data-test="bankaccount-list"]')
+    .contains(`li`, name)
+    .closest('[data-test^="bankaccount-list-item-"]');
+}
+
+describe('Bank Accounts', () => {
+  let testUser: { username: string; password: string };
+
+  beforeEach(() => {
+    /* ------------------------------------------------------------------
+     *  1. Seed an empty database (so the list starts empty)
+     * ------------------------------------------------------------------ */
+    cy.exec('yarn db:seed:empty', { failOnNonZeroExit: false });
+
+    /* ------------------------------------------------------------------
+     *  2. Create a fresh user and log in
+     * ------------------------------------------------------------------ */
+    testUser = {
+      username: `user-${Date.now()}`,
+      password: DEFAULT_PASSWORD,
+    };
+    signUpAndLogin(testUser.username, testUser.password);
     cy.visit('/bankaccounts');
+    cy.location('pathname').should('eq', '/bankaccounts');
+  });
+
+  it('creates a new bank account – full flow', () => {
+    /* --------------------------------------------------------------
+     *  Click the “Create” button
+     * -------------------------------------------------------------- */
     cy.getBySel('bankaccount-new').click();
 
-    // ---- 2a. All fields empty – submit button must stay disabled
-    cy.getBySel('bankaccount-submit').should('be.disabled');
+    /* --------------------------------------------------------------
+     *  Fill the form with valid data
+     * -------------------------------------------------------------- */
+    const bankName = 'Acme Bank';
+    const accountNumber = faker.finance.account(10);
+    const routingNumber = faker.finance.account(9);
 
-    // ---- 2b. Invalid routing number (too short) – error should appear
-    cy.getBySel('bankaccount-routingNumber-input')
-      .type('123') // less than 9 chars
-      .blur();
+    createBankAccount(bankName, accountNumber, routingNumber);
 
-    // Formik shows the validation error as helper text
-    cy.get('[data-test="bankaccount-routingNumber-input"]')
-      .parent()
-      .parent()
-      .find('p.MuiFormHelperText-root')
-      .should('contain', 'Must contain a valid routing number');
+    /* --------------------------------------------------------------
+     *  Verify the account shows up in the list
+     * -------------------------------------------------------------- */
+    findAccountItem(bankName).within(() => {
+      cy.contains(bankName).should('be.visible');
+      cy.contains('(Deleted)').should('not.exist');
+    });
+  });
 
-    // Submit button still disabled because the form is invalid
-    cy.getBySel('bankaccount-submit').should('be.disabled');
+  it('validates bank account form fields', () => {
+    cy.getBySel('bankaccount-new').click();
 
-    // ---- 2c. Invalid account number (too short) – error should appear
-    cy.getBySel('bankaccount-accountNumber-input')
-      .type('12') // less than 9 digits
-      .blur();
-
-    cy.get('[data-test="bankaccount-accountNumber-input"]')
-      .parent()
-      .parent()
-      .find('p.MuiFormHelperText-root')
-      .should('contain', 'Must contain at least 9 digits');
-
-    // ---- 2d. Provide valid values for the two fields and a short bank name
-    // (bankName must be ≥5 chars)
-    const shortBankName = 'Abc';
-    cy.getBySel('bankaccount-bankName-input')
-      .type(shortBankName)
-      .blur();
+    /* --------------------------------------------------------------
+     *  Leave all fields empty and submit
+     * -------------------------------------------------------------- */
+    cy.getBySel('bankaccount-submit').click();
 
     cy.get('[data-test="bankaccount-bankName-input"]')
       .parent()
+      .find('p.MuiFormHelperText-root')
+      .should('contain.text', 'Enter a bank name');
+
+    cy.get('[data-test="bankaccount-accountNumber-input"]')
       .parent()
       .find('p.MuiFormHelperText-root')
-      .should('contain', 'Must contain at least 5 characters');
+      .should('contain.text', 'Must contain at least 9 digits');
 
-    // ---- 2e. Correct the fields – button becomes enabled
-    const validBankName = 'Cypress Savings';
-    cy.getBySel('bankaccount-bankName-input')
-      .clear()
-      .type(validBankName);
+    cy.get('[data-test="bankaccount-routingNumber-input"]')
+      .parent()
+      .find('p.MuiFormHelperText-root')
+      .should('contain.text', 'Must contain a valid routing number');
 
-    cy.getBySel('bankaccount-routingNumber-input')
-      .clear()
-      .type('987654321'); // valid 9‑digit routing
+    /* --------------------------------------------------------------
+     *  Fill only bankName, keep routing invalid, submit
+     * -------------------------------------------------------------- */
+    cy.getBySel('bankaccount-bankName-input').type('Test Bank');
+    cy.getBySel('bankaccount-accountNumber-input').type('123456'); // too short
+    cy.getBySel('bankaccount-routingNumber-input').type('abcde'); // not numeric
 
-    cy.getBySel('bankaccount-accountNumber-input')
-      .clear()
-      .type('1234567890'); // valid 10‑digit account
-
-    cy.getBySel('bankaccount-submit')
-      .should('not.be.disabled')
-      .click();
-
-    // Verify the newly created account appears in the list
-    cy.get(`[data-test^=bankaccount-list-item-]`).contains(validBankName).should('exist');
-  });
-
-  // -------------------------------------------------------------------------
-  // 3️⃣  SOFT‑DELETE – mark a bank account as deleted
-  // -------------------------------------------------------------------------
-  it('should soft‑delete an existing bank account', () => {
-    createAndLoginUser();
-
-    // Create a bank account first (reuse the happy‑path flow)
-    cy.visit('/bankaccounts');
-    cy.getBySel('bankaccount-new').click();
-
-    const bankName = `DeleteMe Bank ${Date.now()}`;
-    const routingNumber = '111222333';
-    const accountNumber = '9998887776';
-
-    cy.getBySel('bankaccount-bankName-input').type(bankName);
-    cy.getBySel('bankaccount-routingNumber-input').type(routingNumber);
-    cy.getBySel('bankaccount-accountNumber-input').type(accountNumber);
     cy.getBySel('bankaccount-submit').click();
 
-    // Ensure the account appears
-    cy.get(`[data-test^=bankaccount-list-item-]`).contains(bankName).should('exist');
+    cy.get('[data-test="bankaccount-accountNumber-input"]')
+      .parent()
+      .find('p.MuiFormHelperText-root')
+      .should('contain.text', 'Must contain at least 9 digits');
 
-    // Click the Delete button for that account
-    // The Delete button lives inside the list‑item; we locate it by data-test
-    cy.get(`[data-test^=bankaccount-list-item-]`).contains(bankName).parents('[data-test^=bankaccount-list-item-]')
-      .within(() => {
-        cy.getBySel('bankaccount-delete').click();
-      });
-
-    // After soft delete the UI shows "(Deleted)" next to the bank name
-    cy.get(`[data-test^=bankaccount-list-item-]`).contains(`${bankName} (Deleted)`).should('exist');
+    cy.get('[data-test="bankaccount-routingNumber-input"]')
+      .parent()
+      .find('p.MuiFormHelperText-root')
+      .should('contain.text', 'Must contain a valid routing number');
   });
 
-  // -------------------------------------------------------------------------
-  // 4️⃣  EMPTY LIST + ONBOARDING MODAL
-  // -------------------------------------------------------------------------
-  it('should show empty list state and onboarding modal for a brand‑new user', () => {
-    // Create a fresh user – by definition this user has **no** bank accounts
-    createAndLoginUser();
+  it('soft‑deletes a bank account', () => {
+    /* --------------------------------------------------------------
+     *  Create a bank account first
+     * -------------------------------------------------------------- */
+    const bankName = 'Delete Test Bank';
+    const accountNumber = faker.finance.account(10);
+    const routingNumber = faker.finance.account(9);
 
-    // The onboarding dialog is displayed automatically for users without accounts
+    cy.getBySel('bankaccount-new').click();
+    createBankAccount(bankName, accountNumber, routingNumber);
+
+    /* --------------------------------------------------------------
+     *  Soft‑delete it
+     * -------------------------------------------------------------- */
+    findAccountItem(bankName)
+      .find('[data-test="bankaccount-delete"]')
+      .click({ force: true });
+
+    /* --------------------------------------------------------------
+     *  Verify the account is marked as deleted
+     * -------------------------------------------------------------- */
+    findAccountItem(bankName).within(() => {
+      cy.contains('(Deleted)').should('be.visible');
+      // delete button should no longer exist
+      cy.contains('Delete').should('not.exist');
+    });
+  });
+
+  it('shows empty list and onboarding modal when no accounts exist', () => {
+    /* --------------------------------------------------------------
+     *  Ensure the list is empty
+     * -------------------------------------------------------------- */
+    cy.get('[data-test="bankaccount-list"]').should('not.exist');
+    cy.get('[data-test="empty-list-header"]').contains('No Bank Accounts').should('be.visible');
+
+    /* --------------------------------------------------------------
+     *  Onboarding modal should appear
+     * -------------------------------------------------------------- */
     cy.get('[data-test="user-onboarding-dialog"]').should('be.visible');
-    cy.get('[data-test="user-onboarding-dialog-title"]')
-      .should('contain.text', 'Get Started with Real World App');
 
-    // Navigate to the Bank Accounts page – the list should be empty
-    cy.visit('/bankaccounts');
+    /* --------------------------------------------------------------
+     *  Step 1: “Get Started” – click Next to go to Step 2
+     * -------------------------------------------------------------- */
+    cy.get('[data-test="user-onboarding-next"]').click();
 
-    // The EmptyList component renders a header with data-test="empty-list-header"
-    cy.get('[data-test="empty-list-header"]').should('contain.text', 'No Bank Accounts');
+    /* --------------------------------------------------------------
+     *  Step 2: Create a bank account within the modal
+     * -------------------------------------------------------------- */
+    const bankName = 'Onboard Bank';
+    const accountNumber = faker.finance.account(10);
+    const routingNumber = faker.finance.account(9);
 
-    // The onboarding dialog should still be present (stepOne) because no accounts yet
-    cy.get('[data-test="user-onboarding-dialog"]').should('be.visible');
+    cy.getBySel('bankaccount-bankName-input').clear().type(bankName);
+    cy.getBySel('bankaccount-accountNumber-input')
+      .clear()
+      .type(accountNumber);
+    cy.getBySel('bankaccount-routingNumber-input')
+      .clear()
+      .type(routingNumber);
+    cy.getBySel('bankaccount-submit').click();
+
+    /* --------------------------------------------------------------
+     *  Step 3: “Finished” – verify modal shows “Finished” state
+     * -------------------------------------------------------------- */
+    cy.contains('Finished').should('be.visible');
+
+    /* --------------------------------------------------------------
+     *  Close the modal
+     * -------------------------------------------------------------- */
+    cy.get('[data-test="user-onboarding-next"]').click(); // “Done”
+    cy.get('[data-test="user-onboarding-dialog"]').should('not.exist');
+
+    /* --------------------------------------------------------------
+     *  The new account should now appear in the list
+     * -------------------------------------------------------------- */
+    findAccountItem(bankName).within(() => {
+      cy.contains(bankName).should('be.visible');
+    });
   });
 });

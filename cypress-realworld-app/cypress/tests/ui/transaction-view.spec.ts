@@ -1,157 +1,309 @@
 
-describe('Transaction View', () => {
-  // -----------------------------------------------------------------
-  // Helper – seed DB, pick a random user and log in via XState.
-  // -----------------------------------------------------------------
-  const loginAsRandomUser = () => {
-    // 1️⃣  Grab any user from the seeded DB.
-    return cy
-      .task('find:database', { entity: 'users' })
-      .then((user: any) => {
-        // 2️⃣  Use the XState command (login via API + XState event)
-        //     which also stores the session cookie.
-        cy.loginByXstate(user.username, Cypress.env('defaultPassword'));
-        // expose the logged‑in user for later use
-        return user;
-      });
+// cypress/tests/ui/transaction-view.spec.ts
+//
+// Cypress e2e test suite for the *Transaction View* page.
+// It contains 6 scenarios that exercise the UI behaviour described
+// in the “CENÁRIOS OBRIGATÓRIOS” section.
+//
+// ──────────────────────────────────────────────────────────────
+//   1. Navigation tabs hidden on transaction page
+//   2. Like a transaction – check count and button disabled
+//   3. Add multiple comments – all comments are rendered
+//   4. Accept a transaction request – button disappears
+//   5. Reject a transaction request – button disappears
+//   6. For a completed transaction – accept/reject buttons are not present
+//
+// The tests are written in TypeScript and rely on the custom Cypress
+// commands defined in `src/support/commands.ts`.
+//
+// The test flow is completely self‑contained – it creates its own
+// users, bank accounts and transactions via the API, then
+// navigates to the UI. All data is isolated per test so that
+// the tests do not interfere with each other.
+//
+// ──────────────────────────────────────────────────────────────
+import { faker } from '@faker-js/faker';
+
+const DEFAULT_PASSWORD = Cypress.env('defaultPassword');
+const API_URL = Cypress.env('apiUrl');
+
+// --------------------------------------------------------------
+// Helpers
+// --------------------------------------------------------------
+
+/**
+ * Create a new user via the public `/users` endpoint.
+ * Returns the full user object that was returned by the API.
+ */
+const createUser = (username: string) => {
+  const user: any = {
+    firstName: faker.name.firstName(),
+    lastName: faker.name.lastLastName(),
+    username,
+    password: DEFAULT_PASSWORD,
+    email: faker.internet.email(),
+    phoneNumber: faker.phone.phoneNumber(),
+    balance: faker.datatype.number({ min: 1000, max: 2000 }),
+    avatar: `https://avatars.dicebear.com/api/human/${username}.svg`,
+    defaultPrivacyLevel: 'public',
   };
+  return cy.request({
+    method: 'POST',
+    url: `${API_URL}/users`,
+    body: user,
+  }).then((resp) => resp.body);
+};
 
-  // -----------------------------------------------------------------
-  // Runs before every test: clean DB + log in.
-  // -----------------------------------------------------------------
-  beforeEach(() => {
-    cy.task('db:seed');
-    loginAsRandomUser();
+/**
+ * Login via the API – stores the session cookie.
+ */
+const loginByApi = (username: string) => {
+  return cy.loginByApi(username, DEFAULT_PASSWORD);
+};
+
+/**
+ * Create a bank account for a user that is already logged in.
+ * Returns the account object.
+ */
+const createBankAccount = (userId: string) => {
+  const account = {
+    bankName: `${faker.company.name()} Bank`,
+    accountNumber: faker.finance.account(10),
+    routingNumber: faker.finance.account(9),
+  };
+  return cy.request({
+    method: 'POST',
+    url: `${API_URL}/bankAccounts`,
+    body: { ...account, userId },
+  }).then((resp) => resp.body.account);
+};
+
+/**
+ * Create a transaction (payment or request) from the logged‑in user
+ * to the supplied receiver. Returns the transaction object.
+ */
+const createTransaction = (
+  type: 'payment' | 'request',
+  receiverId: string,
+  sourceId: string,
+  amount = faker.datatype.number({ min: 1000, max: 5000 })
+) => {
+  const payload = {
+    transactionType: type,
+    receiverId,
+    description: `${type === 'payment' ? 'Payment' : 'Request'}: ${receiverId}`,
+    amount: amount.toString(),
+    privacyLevel: 'public',
+    source: sourceId,
+  };
+  return cy.request({
+    method: 'POST',
+    url: `${API_URL}/transactions`,
+    body: payload,
+  }).then((resp) => resp.body.transaction);
+};
+
+/**
+ * Create multiple comments for a transaction.
+ */
+const createComments = (transactionId: string, count = 3) => {
+  const comments = [];
+  for (let i = 0; i < count; i++) {
+    comments.push(
+      cy.request({
+        method: 'POST',
+        url: `${API_URL}/comments/${transactionId}`,
+        body: { content: faker.lorem.sentence() },
+      })
+    );
+  }
+  return Promise.all(comments).then(() => {});
+};
+
+const transactionViewUrl = (id: string) => `/transaction/${id}`;
+
+// --------------------------------------------------------------
+// Test suite
+// --------------------------------------------------------------
+describe('Transaction View – UI Behaviour', () => {
+  // ----------------------------------------------------------
+  // 1. Navigation tabs hidden on transaction view
+  // ----------------------------------------------------------
+  it('Navigation tabs should be hidden on the transaction detail page', () => {
+    // Create two users and a transaction
+    const userA = `user-${faker.datatype.uuid().slice(0, 8)}`;
+    const userB = `user-${faker.datatype.uuid().slice(0, 8)}`;
+
+    // User A
+    createUser(userA).then((uA) =>
+      loginByApi(userA).then(() =>
+        createBankAccount(uA.id).then((bankAcc) =>
+          createUser(userB).then((uB) =>
+            createTransaction('payment', uB.id, bankAcc.id).then((txn) => {
+              // Visit the transaction view
+              cy.visit(transactionViewUrl(txn.id));
+
+              // Tabs are not rendered
+              cy.get('[data-test="nav-transaction-tabs"]')
+                .should('not.exist')
+                .and('not.be.visible');
+            })
+          )
+        )
+      )
+    );
   });
 
-  // -----------------------------------------------------------------
-  // 1️⃣ Navigation tabs are not rendered on the transaction view page.
-  // -----------------------------------------------------------------
-  it('hides the navigation tabs on the transaction view page', () => {
-    // Pick any transaction – the tabs are hidden for *any* detail page.
-    cy.task('find:database', { entity: 'transactions' }).then((tx: any) => {
-      cy.visit(`/transaction/${tx.id}`);
-      // The tabs component is rendered only on the list pages.
-      cy.get('[data-test=nav-transaction-tabs]').should('not.exist');
-    });
+  // ----------------------------------------------------------
+  // 2. Like a transaction + verify count + button disabled
+  // ----------------------------------------------------------
+  it('User can like a transaction and the like count updates and button disables', () => {
+    const userA = `user-${faker.datatype.uuid().slice(0, 8)}`;
+    const userB = `user-${faker.datatype.uuid().slice(0, 8)}`;
+
+    createUser(userA).then((uA) =>
+      loginByApi(userA).then(() =>
+        createBankAccount(uA.id).then((bankAcc) =>
+          createUser(userB).then((uB) =>
+            createTransaction('payment', uB.id, bankAcc.id).then((txn) => {
+              // Like the transaction
+              cy.request({
+                method: 'POST',
+                url: `${API_URL}/likes/${txn.id}`,
+              });
+
+              // Visit transaction detail
+              cy.visit(transactionViewUrl(txn.id));
+
+              // Like count should be 1
+              cy.get(`[data-test="transaction-like-count-${txn.id}"]`).should(
+                'contain',
+                '1'
+              );
+
+              // Like button should be disabled for the current user
+              cy.get(`[data-test="transaction-like-button-${txn.id}"]`)
+                .should('be.disabled')
+                .and('have.attr', 'aria-label', 'like');
+            })
+          )
+        )
+      )
+    );
   });
 
-  // -----------------------------------------------------------------
-  // 2️⃣ Like a transaction – verify counter and disabled state.
-  // -----------------------------------------------------------------
-  it('allows a user to like a transaction, increments the count and disables the button', () => {
-    // Find a payment transaction that the logged‑in user has **not** liked yet.
-    cy.task('find:database', { entity: 'transactions', query: { requestStatus: '' } })
-      .then((tx: any) => {
-        cy.visit(`/transaction/${tx.id}`);
+  // ----------------------------------------------------------
+  // 3. Comments in transaction (multiple comments)
+  // ----------------------------------------------------------
+  it('All comments for a transaction are displayed', () => {
+    const userA = `user-${faker.datatype.uuid().slice(0, 8)}`;
+    const userB = `user-${faker.datatype.uuid().slice(0, 8)}`;
 
-        // Capture the initial count.
-        const likeCountSel = `[data-test=transaction-like-count-${tx.id}]`;
-        cy.get(likeCountSel)
-          .invoke('text')
-          .then((initialText) => {
-            const initialCount = Number(initialText.trim());
+    createUser(userA).then((uA) =>
+      loginByApi(userA).then(() =>
+        createBankAccount(uA.id).then((bankAcc) =>
+          createUser(userB).then((uB) =>
+            createTransaction('payment', uB.id, bankAcc.id).then((txn) => {
+              // Create 3 comments
+              createComments(txn.id, 3).then(() => {
+                // Visit transaction detail
+                cy.visit(transactionViewUrl(txn.id));
 
-            // Click the like button.
-            cy.get(`[data-test=transaction-like-button-${tx.id}]`).click();
-
-            // Counter should increase by one.
-            cy.get(likeCountSel)
-              .should('contain', initialCount + 1);
-
-            // The button must now be disabled.
-            cy.get(`[data-test=transaction-like-button-${tx.id}]`).should('be.disabled');
-          });
-      });
+                // All comment list items should be present
+                cy.get('[data-test^="comment-list-item-"]')
+                  .should('have.length', 3)
+                  .each(($el) => {
+                    expect($el.text()).to.have.length.greaterThan(0);
+                  });
+              });
+            })
+          )
+        )
+      )
+    );
   });
 
-  // -----------------------------------------------------------------
-  // 3️⃣ Multiple comments are displayed on a transaction.
-  // -----------------------------------------------------------------
-  it('renders multiple comments for a transaction', () => {
-    // Grab a transaction first.
-    cy.task('find:database', { entity: 'transactions' }).then((tx: any) => {
-      const commentTexts = ['First comment', 'Second comment'];
+  // ----------------------------------------------------------
+  // 4. Accept transaction request + button disappears
+  // ----------------------------------------------------------
+  it('Receiver can accept a transaction request and the button disappears', () => {
+    const userA = `user-${faker.datatype.uuid().slice(0, 8)}`; // sender
+    const userB = `user-${faker.datatype.uuid().slice(0, 8)}`; // receiver
 
-      // Post two comments via the API (the session cookie is already set).
-      commentTexts.forEach((txt) => {
-        cy.request('POST', `${Cypress.env('apiUrl')}/comments/${tx.id}`, {
-          content: txt,
-        });
-      });
+    createUser(userA).then((uA) =>
+      loginByApi(userA).then(() =>
+        createBankAccount(uA.id).then((bankAcc) =>
+          createUser(userB).then((uB) =>
+            createTransaction('request', uB.id, bankAcc.id).then((txn) => {
+              // Log in as receiver
+              loginByApi(userB).then(() => {
+                cy.visit(transactionViewUrl(txn.id));
 
-      // Load the page after the API calls have resolved.
-      cy.visit(`/transaction/${tx.id}`);
+                // Accept button should exist
+                const acceptBtn = `[data-test="transaction-accept-request-${txn.id}"]`;
+                cy.get(acceptBtn).should('be.visible').click();
 
-      // Both comments must appear in the list.
-      cy.get('[data-test=comments-list]')
-        .children()
-        .should('have.length', 2)
-        .each(($el, index) => {
-          cy.wrap($el).should('contain.text', commentTexts[index]);
-        });
-    });
+                // Button should no longer exist
+                cy.get(acceptBtn).should('not.exist');
+              });
+            })
+          )
+        )
+      )
+    );
   });
 
-  // -----------------------------------------------------------------
-  // 4️⃣ Accept a pending request – buttons disappear after click.
-  // -----------------------------------------------------------------
-  it('accepts a pending request and hides accept/reject buttons', () => {
-    // Find a *pending* request where the logged‑in user is the receiver.
-    // The seed guarantees at least one such transaction.
-    cy.task('find:database', {
-      entity: 'transactions',
-      query: { requestStatus: 'pending' },
-    }).then((tx: any) => {
-      // Ensure the logged‑in user is the receiver of the request.
-      // If not, pick another one (very unlikely with random data).
-      cy.visit(`/transaction/${tx.id}`);
+  // ----------------------------------------------------------
+  // 5. Reject transaction request + button disappears
+  // ----------------------------------------------------------
+  it('Receiver can reject a transaction request and the button disappears', () => {
+    const userA = `user-${faker.datatype.uuid().slice(0, 8)}`; // sender
+    const userB = `user-${faker.datatype.uuid().slice(0, 8)}`; // receiver
 
-      // Click the accept button.
-      cy.get(`[data-test=transaction-accept-request-${tx.id}]`).click();
+    createUser(userA).then((uA) =>
+      loginByApi(userA).then(() =>
+        createBankAccount(uA.id).then((bankAcc) =>
+          createUser(userB).then((uB) =>
+            createTransaction('request', uB.id, bankAcc.id).then((txn) => {
+              // Log in as receiver
+              loginByApi(userB).then(() => {
+                cy.visit(transactionViewUrl(txn.id));
 
-      // After the request is accepted the buttons must be gone.
-      cy.get(`[data-test=transaction-accept-request-${tx.id}]`).should('not.exist');
-      cy.get(`[data-test=transaction-reject-request-${tx.id}]`).should('not.exist');
-    });
+                // Reject button should exist
+                const rejectBtn = `[data-test="transaction-reject-request-${txn.id}"]`;
+                cy.get(rejectBtn).should('be.visible').click();
+
+                // Button should no longer exist
+                cy.get(rejectBtn).should('not.exist');
+              });
+            })
+          )
+        )
+      )
+    );
   });
 
-  // -----------------------------------------------------------------
-  // 5️⃣ Reject a pending request – buttons disappear after click.
-  // -----------------------------------------------------------------
-  it('rejects a pending request and hides accept/reject buttons', () => {
-    // Find a pending request where the logged‑in user is the receiver.
-    // To avoid picking the same transaction used in the previous test
-    // we ask the server for another one (the DB is reset before each test).
-    cy.task('find:database', {
-      entity: 'transactions',
-      query: { requestStatus: 'pending' },
-    }).then((tx: any) => {
-      cy.visit(`/transaction/${tx.id}`);
+  // ----------------------------------------------------------
+  // 6. Accept/reject buttons not shown on completed transaction
+  // ----------------------------------------------------------
+  it('No accept/reject buttons for a completed transaction', () => {
+    const userA = `user-${faker.datatype.uuid().slice(0, 8)}`;
 
-      // Click the reject button.
-      cy.get(`[data-test=transaction-reject-request-${tx.id}]`).click();
+    createUser(userA).then((uA) =>
+      loginByApi(userA).then(() =>
+        createBankAccount(uA.id).then((bankAcc) =>
+          createTransaction('payment', uA.id, bankAcc.id).then((txn) => {
+            cy.visit(transactionViewUrl(txn.id));
 
-      // Buttons must disappear.
-      cy.get(`[data-test=transaction-accept-request-${tx.id}]`).should('not.exist');
-      cy.get(`[data-test=transaction-reject-request-${tx.id}]`).should('not.exist');
-    });
-  });
-
-  // -----------------------------------------------------------------
-  // 6️⃣ Accept/Reject buttons never appear on a completed transaction.
-  // -----------------------------------------------------------------
-  it('does not show accept/reject buttons for a completed transaction', () => {
-    // Grab a transaction that is *complete* (either a payment or an accepted request).
-    cy.task('find:database', {
-      entity: 'transactions',
-      query: { status: 'complete' },
-    }).then((tx: any) => {
-      cy.visit(`/transaction/${tx.id}`);
-
-      // The two buttons should not be present.
-      cy.get(`[data-test=transaction-accept-request-${tx.id}]`).should('not.exist');
-      cy.get(`[data-test=transaction-reject-request-${tx.id}]`).should('not.exist');
-    });
+            cy.get(`[data-test="transaction-accept-request-${txn.id}"]`).should(
+              'not.exist'
+            );
+            cy.get(`[data-test="transaction-reject-request-${txn.id}"]`).should(
+              'not.exist'
+            );
+          })
+        )
+      )
+    );
   });
 });

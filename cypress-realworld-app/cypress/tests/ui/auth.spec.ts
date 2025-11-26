@@ -1,196 +1,199 @@
 
+import faker from 'faker';
 
-describe('Authentication – Real World App', () => {
-  // -------------------------------------------------------------------------
-  // Helper – obtain a deterministic user from the seeded DB.
-  // -------------------------------------------------------------------------
-  let seededUser: {
-    username: string;
-    password: string; // the default password set in .env (exposed via Cypress env)
-    firstName: string;
-    lastName: string;
-  };
-
-  before(() => {
-    // The API server is already running (started by `yarn start:ci` in the CI).
-    // Grab the first user from the seed so the tests are deterministic.
-    cy.request('GET', `${Cypress.env('apiUrl')}/users`).then((resp) => {
-      const first = resp.body.results[0];
-      seededUser = {
-        username: first.username,
-        password: Cypress.env('defaultPassword'), // same for every seeded user
-        firstName: first.firstName,
-        lastName: first.lastName,
-      };
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // Reset DB before each test – guarantees isolation.
-  // -------------------------------------------------------------------------
+describe('Real‑World App – Authentication', () => {
+  /* ------------------------------------------------------------------
+   *  Setup – reset the database before each test
+   * ------------------------------------------------------------------ */
   beforeEach(() => {
+    // Seed the DB with the original data set
     cy.task('db:seed');
   });
 
-  // -------------------------------------------------------------------------
-  // 1️⃣  Redirection – non‑authenticated user tries to access a protected page.
-  // -------------------------------------------------------------------------
-  it('Redirects unauthenticated user from a protected route to the sign‑in page', () => {
-    cy.visit('/personal'); // protected route
+  /* ------------------------------------------------------------------
+   *  1. Redirect unauthenticated user to Sign‑In
+   * ------------------------------------------------------------------ */
+  it('redirects unauthenticated user from /personal to /signin', () => {
+    cy.visit('/personal');
     cy.location('pathname').should('eq', '/signin');
   });
 
-  // -------------------------------------------------------------------------
-  // 2️⃣  Login with “remember me”, verify cookie, then logout.
-  // -------------------------------------------------------------------------
-  it('Logs in with “Remember me”, checks session cookie, then logs out', () => {
-    // UI login (the custom command also asserts the request was made)
-    cy.login(seededUser.username, seededUser.password, true);
+  /* ------------------------------------------------------------------
+   *  2. Login with Remember‑Me, verify cookie, and logout
+   * ------------------------------------------------------------------ */
+  it('logs in with Remember‑Me, keeps session cookie, and logs out', () => {
+    // Grab a real user from the seeded DB
+    cy.task('filter:database', { entity: 'users', query: {} }).then((users: any[]) => {
+      const user = users[0];
+      const pwd = Cypress.env('defaultPassword');
 
-    // The app uses an express‑session cookie called `connect.sid`
-    cy.getCookie('connect.sid')
-      .should('exist')
-      .and((cookie) => {
-        // a session cookie should have a value (non‑empty string)
-        expect(cookie?.value).to.be.a('string').and.not.be.empty;
+      // Intercept the login and logout requests for later assertions
+      cy.server();
+      cy.route('POST', '/login').as('loginUser');
+      cy.route('POST', '/logout').as('logoutUser');
+
+      // Perform the login
+      cy.visit('/signin');
+      cy.getBySel('signin-username').type(user.username);
+      cy.getBySel('signin-password').type(pwd);
+      cy.getBySel('signin-remember-me').find('input').check();
+      cy.getBySel('signin-submit').click();
+
+      cy.wait('@loginUser').then(() => {
+        // Session cookie must be present
+        cy.getCookie('connect.sid').should('exist');
+
+        // Verify we are on a protected route
+        cy.visit('/personal');
+        cy.location('pathname').should('eq', '/personal');
+
+        // Log out
+        cy.logoutByXstate();
+        cy.wait('@logoutUser');
+
+        // Cookie should be gone after logout
+        cy.getCookie('connect.sid').should('not.exist');
       });
-
-    // Logout via XState (bypasses the UI but still hits the /logout endpoint)
-    cy.logoutByXstate();
-
-    // After logout we should be back on the sign‑in page
-    cy.location('pathname').should('eq', '/signin');
+    });
   });
 
-  // -------------------------------------------------------------------------
-  // 3️⃣  Full signup → onboarding (bank account) → dashboard.
-  // -------------------------------------------------------------------------
-  it('Signs up a new user, completes onboarding and lands on the dashboard', () => {
+  /* ------------------------------------------------------------------
+   *  3. Full Sign‑Up → Onboarding → Dashboard
+   * ------------------------------------------------------------------ */
+  it('signs up, goes through onboarding, and lands on dashboard', () => {
+    // Generate a fresh user
     const newUser = {
-      firstName: 'Cypress',
-      lastName: 'Tester',
-      username: `cyp_user_${Date.now()}`,
+      firstName: faker.name.firstName(),
+      lastName: faker.name.lastName(),
+      username: faker.internet.userName(),
       password: 'Password123',
     };
 
-    // ----- SIGN‑UP ---------------------------------------------------------
-    cy.visit('/signup');
+    // Intercept the signup and login requests
+    cy.server();
+    cy.route('POST', '/users').as('signupUser');
 
+    // Sign‑Up flow
+    cy.visit('/signup');
     cy.getBySel('signup-first-name').type(newUser.firstName);
     cy.getBySel('signup-last-name').type(newUser.lastName);
     cy.getBySel('signup-username').type(newUser.username);
     cy.getBySel('signup-password').type(newUser.password);
     cy.getBySel('signup-confirmPassword').type(newUser.password);
+
+    // Submit – should redirect to sign‑in
     cy.getBySel('signup-submit').click();
+    cy.wait('@signupUser').then(() => {
+      cy.location('pathname').should('eq', '/signin');
 
-    // after a successful sign‑up the app redirects to /signin
-    cy.location('pathname').should('eq', '/signin');
+      // Log in the newly created user
+      cy.route('POST', '/login').as('loginUser');
+      cy.getBySel('signin-username').type(newUser.username);
+      cy.getBySel('signin-password').type(newUser.password);
+      cy.getBySel('signin-submit').click();
+      cy.wait('@loginUser');
 
-    // ----- LOGIN -----------------------------------------------------------
-    cy.login(newUser.username, newUser.password);
+      // ------------------------------------------------------------
+      // Onboarding dialog – create a bank account
+      // ------------------------------------------------------------
+      cy.getBySel('user-onboarding-dialog').should('be.visible');
 
-    // ----- ONBOARDING ------------------------------------------------------
-    // the onboarding dialog appears because the user has no bank accounts yet
-    cy.get('[data-test="user-onboarding-dialog"]').should('be.visible');
+      // Switch to the "Create Bank Account" step
+      cy.get('#bankaccount-bankName-input').type('Mock Bank');
+      cy.get('#bankaccount-accountNumber-input').type('1234567890');
+      cy.get('#bankaccount-routingNumber-input').type('987654321');
 
-    // Step 1 → Next (explain why we need a bank account)
-    cy.get('[data-test="user-onboarding-next"]').click();
+      cy.getBySel('bankaccount-submit').click();
 
-    // Step 2 – create a bank account (the form is rendered inside the dialog)
-    cy.get('[data-test="bankaccount-bankName-input"]').type('Cypress Bank');
-    cy.get('[data-test="bankaccount-routingNumber-input"]').type('123456789');
-    cy.get('[data-test="bankaccount-accountNumber-input"]').type('1234567890');
-    cy.get('[data-test="bankaccount-submit"]').click();
-
-    // After creating the bank account the onboarding dialog moves to step 3
-    cy.get('[data-test="user-onboarding-dialog-title"]')
-      .should('contain', 'Finished');
-
-    // Finish onboarding
-    cy.get('[data-test="user-onboarding-next"]').click();
-
-    // The dialog should now be closed and the user should see the dashboard
-    cy.get('[data-test="user-onboarding-dialog"]').should('not.exist');
-
-    // Verify that the main content (transaction list) is rendered
-    cy.get('[data-test="nav-transaction-tabs"]').should('be.visible');
+      // After the dialog closes we should be on the main dashboard
+      cy.getBySel('user-onboarding-dialog').should('not.exist');
+      cy.getBySel('transaction-list').should('be.visible');
+    });
   });
 
-  // -------------------------------------------------------------------------
-  // 4️⃣  Login form validations – required fields and disabled submit button.
-  // -------------------------------------------------------------------------
-  it('Shows validation errors on the login form and disables the submit button until the form is valid', () => {
+  /* ------------------------------------------------------------------
+   *  4. Sign‑In validations – required fields + button disabled
+   * ------------------------------------------------------------------ */
+  it('validates required fields on sign‑in form and disables the submit button', () => {
     cy.visit('/signin');
 
-    // Initially the button is disabled
+    // Initial state – button disabled
     cy.getBySel('signin-submit').should('be.disabled');
 
-    // Fill only the username – still disabled
-    cy.getBySel('signin-username').type('anyuser');
+    // Fill only username
+    cy.getBySel('signin-username').type('demoUser');
     cy.getBySel('signin-submit').should('be.disabled');
 
-    // Fill password – button becomes enabled
-    cy.getBySel('signin-password').type('anypassword');
+    // Fill short password – still disabled
+    cy.getBySel('signin-password').type('abc'); // 3 chars
+    cy.getBySel('signin-submit').should('be.disabled');
+
+    // Fill proper password – button enabled
+    cy.getBySel('signin-password').type('abcd'); // 4 chars
     cy.getBySel('signin-submit').should('not.be.disabled');
-
-    // Clear username → button disabled again
-    cy.getBySel('signin-username').clear();
-    cy.getBySel('signin-submit').should('be.disabled');
   });
 
-  // -------------------------------------------------------------------------
-  // 5️⃣  Signup form validations – required fields and password mismatch.
-  // -------------------------------------------------------------------------
-  it('Validates the signup form fields and shows a password‑mismatch error', () => {
+  /* ------------------------------------------------------------------
+   *  5. Sign‑Up validations – all fields + password mismatch
+   * ------------------------------------------------------------------ */
+  it('validates required fields on sign‑up form and shows mismatch error', () => {
     cy.visit('/signup');
 
-    // All fields are required – the submit button starts disabled
+    // The submit button should start disabled
     cy.getBySel('signup-submit').should('be.disabled');
 
-    // Fill everything correctly except the password confirmation
-    cy.getBySel('signup-first-name').type('Foo');
-    cy.getBySel('signup-last-name').type('Bar');
-    cy.getBySel('signup-username').type('foobar');
-    cy.getBySel('signup-password').type('Secret123');
-    cy.getBySel('signup-confirmPassword').type('Secret321'); // mismatch
+    // Fill all required fields but leave passwords mismatching
+    cy.getBySel('signup-first-name').type('John');
+    cy.getBySel('signup-last-name').type('Doe');
+    cy.getBySel('signup-username').type('johndoe123');
+    cy.getBySel('signup-password').type('Password1');
+    cy.getBySel('signup-confirmPassword').type('Password2');
 
-    // The button stays disabled because the form is invalid
+    // Button remains disabled due to mismatch
     cy.getBySel('signup-submit').should('be.disabled');
 
-    // The password‑mismatch helper text appears
-    cy.get('#confirmPassword-helper-text')
-      .should('contain', 'Password does not match');
+    // The error message for mismatch should be rendered
+    cy.contains('Password does not match').should('be.visible');
   });
 
-  // -------------------------------------------------------------------------
-  // 6️⃣  Invalid credentials – wrong username / password.
-  // -------------------------------------------------------------------------
-  it('Displays an error message when logging in with invalid credentials', () => {
-    cy.visit('/signin');
+  /* ------------------------------------------------------------------
+   *  6. Sign‑In with invalid credentials – user not found
+   * ------------------------------------------------------------------ */
+  it('shows error when trying to sign‑in with a non‑existent user', () => {
+    cy.route('POST', '/login').as('loginUser');
 
-    // Use a non‑existent user
-    cy.getBySel('signin-username').type('unknown_user');
-    cy.getBySel('signin-password').type('doesnotmatter');
+    cy.visit('/signin');
+    cy.getBySel('signin-username').type('nonexistentUser');
+    cy.getBySel('signin-password').type(Cypress.env('defaultPassword'));
     cy.getBySel('signin-submit').click();
 
-    // The app shows a Material‑UI Alert with the error
-    cy.get('[data-test="signin-error"]')
-      .should('be.visible')
-      .and('contain', 'Username or password is invalid');
+    cy.wait('@loginUser').then(() => {
+      cy.getBySel('signin-error')
+        .should('be.visible')
+        .and('contain.text', 'Username or password is invalid');
+    });
   });
 
-  // -------------------------------------------------------------------------
-  // 7️⃣  Wrong password – correct username but bad password.
-  // -------------------------------------------------------------------------
-  it('Shows the same error when the password is incorrect for a known user', () => {
-    cy.visit('/signin');
+  /* ------------------------------------------------------------------
+   *  7. Sign‑In with wrong password for an existing account
+   * ------------------------------------------------------------------ */
+  it('shows error when password is incorrect for an existing user', () => {
+    // Grab an existing user from the DB
+    cy.task('filter:database', { entity: 'users', query: {} }).then((users: any[]) => {
+      const user = users[0];
 
-    cy.getBySel('signin-username').type(seededUser.username);
-    cy.getBySel('signin-password').type('WrongPassword');
-    cy.getBySel('signin-submit').click();
+      cy.route('POST', '/login').as('loginUser');
 
-    cy.get('[data-test="signin-error"]')
-      .should('be.visible')
-      .and('contain', 'Username or password is invalid');
+      cy.visit('/signin');
+      cy.getBySel('signin-username').type(user.username);
+      cy.getBySel('signin-password').type('wrongPassword123');
+      cy.getBySel('signin-submit').click();
+
+      cy.wait('@loginUser').then(() => {
+        cy.getBySel('signin-error')
+          .should('be.visible')
+          .and('contain.text', 'Username or password is invalid');
+      });
+    });
   });
 });
