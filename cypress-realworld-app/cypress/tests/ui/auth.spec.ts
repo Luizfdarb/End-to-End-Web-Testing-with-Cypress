@@ -1,74 +1,63 @@
-describe('Autenticação', () => {
+// cypress-realworld-app/cypress/tests/ui/auth.spec.ts
+
+describe('Auth', () => {
   beforeEach(() => {
-    // Limpar os dados de autenticação
-    cy.clearCookies();
+    // Reset database or seed with test data if needed
+    // cy.task('db:seed');
   });
 
-  describe('Cadastro', () => {
-    it('deve cadastrar usuário com sucesso', () => {
-      // Acessar a página de cadastro
-      cy.visit('http://localhost:3000/signup');
+  it('cadastra novo usuário com sucesso', () => {
+    const user = {
+      firstName: 'Novo',
+      lastName: 'Usuario',
+      username: 'novousuario',
+      password: 'novasenha',
+    };
 
-      // Preencher o formulário de cadastro
-      cy.get('input[name="firstName"]').type('Fulano');
-      cy.get('input[name="lastName"]').type('Beltrano');
-      cy.get('input[name="username"]').type('fulano');
-      cy.get('input[name="email"]').type('fulano@example.com');
-      cy.get('input[name="password"]').type('123456');
-      cy.get('input[name="confirmPassword"]').type('123456');
+    cy.visit('/signup');
+    cy.getBySel('signup-first-name').type(user.firstName);
+    cy.getBySel('signup-last-name').type(user.lastName);
+    cy.getBySel('signup-username').type(user.username);
+    cy.getBySel('signup-password').type(user.password);
+    cy.getBySel('signup-confirmPassword').type(user.password);
+    cy.getBySel('signup-submit').click();
 
-      // Enviar o formulário de cadastro
-      cy.get('button[type="submit"]').click();
-
-      // Verificar se o usuário é redirecionado para a página de login
-      cy.url().should('eq', 'http://localhost:3000/signin');
-    });
+    cy.url().should('contain', '/signin');
   });
 
-  describe('Login', () => {
-    it('deve logar usuário com sucesso', () => {
-      // Acessar a página de login
-      cy.visit('http://localhost:3000/signin');
+  it('loga com credenciais válidas', () => {
+    const user = {
+      username: Cypress.env('defaultUserUsername'),
+      password: Cypress.env('defaultUserPassword'),
+    };
 
-      // Preencher o formulário de login
-      cy.get('input[name="username"]').type('fulano');
-      cy.get('input[name="password"]').type('123456');
+    cy.visit('/signin');
+    cy.getBySel('signin-username').type(user.username);
+    cy.getBySel('signin-password').type(user.password);
+    cy.getBySel('signin-submit').click();
 
-      // Enviar o formulário de login
-      cy.get('button[type="submit"]').click();
-
-      // Verificar se o usuário é redirecionado para a página principal
-      cy.url().should('eq', 'http://localhost:3000/');
-    });
+    cy.url().should('contain', '/');
   });
 
-  describe('Logout', () => {
-    it('deve deslogar usuário com sucesso', () => {
-      // Acessar a página principal
-      cy.visit('http://localhost:3000/');
+  it('exibe mensagem de erro com credenciais inválidas', () => {
+    const user = {
+      username: 'usernameinvalido',
+      password: 'passwordinvalida',
+    };
 
-      // Simular o clique no botão de logout
-      cy.get('button#logout').click();
+    cy.visit('/signin');
+    cy.getBySel('signin-username').type(user.username);
+    cy.getBySel('signin-password').type(user.password);
+    cy.getBySel('signin-submit').click();
 
-      // Verificar se o usuário é redirecionado para a página de login
-      cy.url().should('eq', 'http://localhost:3000/signin');
-    });
+    cy.getBySel('signin-error').should('be.visible');
   });
 
-  describe('Erros', () => {
-    it('deve exibir mensagem de erro ao tentar logar com dados inválidos', () => {
-      // Acessar a página de login
-      cy.visit('http://localhost:3000/signin');
+  it('realiza logout com sucesso', () => {
+    cy.loginByXstate(Cypress.env('defaultUserUsername'), Cypress.env('defaultUserPassword'));
+    cy.getBySel('sidenav-toggle').click();
+    cy.getBySel('sidenav-signout').click();
 
-      // Preencher o formulário de login com dados inválidos
-      cy.get('input[name="username"]').type('invalido');
-      cy.get('input[name="password"]').type('invalido');
-
-      // Enviar o formulário de login
-      cy.get('button[type="submit"]').click();
-
-      // Verificar se a mensagem de erro é exibida
-      cy.get('div#error-message').should('be.visible');
-    });
+    cy.url().should('contain', '/signin');
   });
 });

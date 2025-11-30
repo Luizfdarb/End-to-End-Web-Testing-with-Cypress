@@ -104,6 +104,17 @@
       "defaultPrivacyLevel": "public",
       "createdAt": "2025-11-26T22:57:24.769Z",
       "modifiedAt": "2025-11-26T22:57:24.769Z"
+    },
+    {
+      "id": "Kh8F9YLry",
+      "uuid": "1659da5b-a24a-416e-af3d-819bae1c45c5",
+      "firstName": "Novo",
+      "lastName": "Usuario",
+      "username": "novousuario",
+      "password": "$2a$10$XUh7x0bqtXZ8tQza9UrjJ.b/6ZO/dkq641.MMgGexHUwzAV6e1rZ2",
+      "balance": 0,
+      "createdAt": "2025-11-27T00:06:45.838Z",
+      "modifiedAt": "2025-11-27T00:06:45.838Z"
     }
   ],
   "contacts": [

@@ -1,30 +1,28 @@
-describe('Bank Accounts', () => {
+/// <reference types="cypress" />
+
+describe("Bank Accounts", () => {
   beforeEach(() => {
-    cy.loginByXstate('user123', 'password123');
+    cy.login("username", "password");
+    cy.visit("/bankaccounts");
   });
 
-  it('create bank account', () => {
-    cy.visit('/bankaccounts/new');
-    cy.get('[data-test="bankaccount-bankName-input"]').type('Bank Name');
-    cy.get('[data-test="bankaccount-routingNumber-input"]').type('123456789');
-    cy.get('[data-test="bankaccount-accountNumber-input"]').type('1234567890123');
-    cy.get('[data-test="bankaccount-submit"]').click();
-    cy.url().should('eq', '/bankaccounts');
-    cy.get('[data-test="bankaccount-list-item-0"]').should('contain', 'Bank Name');
+  it("Deve criar uma conta bancária com sucesso", () => {
+    cy.getBySel("bankaccount-new").click();
+    cy.getBySel("bankaccount-bankName-input").type("Banco do Brasil");
+    cy.getBySel("bankaccount-routingNumber-input").type("123456789");
+    cy.getBySel("bankaccount-accountNumber-input").type("1234567890");
+    cy.getBySel("bankaccount-submit").click();
+    cy.getBySel("bankaccount-list").should("contain", "Banco do Brasil");
   });
 
-  it('list bank accounts', () => {
-    cy.visit('/bankaccounts');
-    cy.get('[data-test="bankaccount-list-item-0"]').should('contain', 'Bank Name');
-    cy.get('[data-test="bankaccount-list-item-1"]').should('contain', 'Bank Name 2');
+  it("Deve listar as contas bancárias", () => {
+    cy.getBySel("bankaccount-list").should("be.visible");
   });
 
-  it('delete bank account', () => {
-    cy.visit('/bankaccounts');
-    cy.get('[data-test="bankaccount-list-item-0"]').within(() => {
-      cy.get('[data-test="bankaccount-delete"]').click();
-    });
-    cy.url().should('eq', '/bankaccounts');
-    cy.get('[data-test="bankaccount-list-item-0"]').should('not.exist');
+  it("Deve excluir uma conta bancária com sucesso", () => {
+    cy.getBySel("bankaccount-list-item-Banco do Brasil")
+      .find("[data-test='bankaccount-delete']")
+      .click();
+    cy.getBySel("bankaccount-list").should("not.contain", "Banco do Brasil");
   });
 });

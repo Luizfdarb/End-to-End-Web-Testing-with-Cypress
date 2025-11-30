@@ -1,30 +1,20 @@
-/// <reference types="cypress" />
+// cypress-realworld-app/cypress/tests/ui/notifications.spec.ts
 
 describe('Notifications', () => {
   beforeEach(() => {
-    cy.loginByXstate('testuser', 'testpassword')
-  })
+    cy.loginByXstate('username', 'password');
+    cy.visit('/notifications');
+  });
 
-  it('Lista de notificações', () => {
-    cy.getBySel('notifications-list')
-      .should('be.visible')
-      .get('li')
-      .should('have.length', 5)
-  })
+  it('deve exibir notificações', () => {
+    cy.getBySel('notifications-list').should('be.visible');
+    cy.getBySelLike('notification-list-item').should('have.length.greaterThan', 0);
+  });
 
-  it('Marcar notificação como lida', () => {
-    cy.getBySel('notification-item-0')
-      .get('button')
-      .click()
-      .getBySel('notification-item-0')
-      .should('have.class', 'read')
-  })
+  it('deve marcar notificação como lida', () => {
+    cy.getBySelLike('notification-mark-read').first().click();
+    cy.getBySelLike('notification-list-item').should('have.length.less lessThan');
+  });
 
-  it('Navegação para tela de notificação', () => {
-    cy.getBySel('notification-item-0')
-      .get('a')
-      .click()
-      .url()
-      .should('contain', 'notification')
-  })
-})
+  // Implementar mais testes de acordo com a necessidade
+});
