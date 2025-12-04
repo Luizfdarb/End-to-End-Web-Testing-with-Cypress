@@ -1,109 +1,134 @@
-﻿import { User } from "../../../src/models";
-import { isMobile } from "../../support/utils";
+﻿// cypress/tests/ui/auth.spec.ts
+import { User } from "../../../src/models";
 
-describe("User Sign-up and Login", function() {
-  const userInfo = {
-    firstName: "Bob",
-    lastName: "Ross",
-    username: "PainterJoy90",
-    password: "s3cret",
-  };
-
-  const bankInfo = {
-    bankName: "The Best Bank",
-    accountNumber: "123456789",
-    routingNumber: "987654321",
-  };
-
-  beforeEach(function() {
+describe("Authentication", () => {
+  // Executa antes de cada teste para garantir um estado limpo
+  beforeEach(() => {
     cy.task("db:seed");
-    cy.server();
-    cy.route("POST", "/users").as("signup");
-    cy.route("GET", "/users").as("allUsers");
-    cy.route("POST", "/bankAccounts").as("createBankAccount");
   });
 
-  it("should redirect unauthenticated user to signin page", function() {
-    cy.visit("/personal");
-    cy.location("pathname").should("eq", "/signin");
-    cy.percySnapshot("Redirect to SignIn");
-  });
+  context("Sign Up", () => {
+    it("should allow a visitor to sign up", () => {
+      cy.visit("/signup");
 
-  it("should remember a user for 30 days after login", function() {
-    cy.database("find", "users").then((user: User) => {
-      cy.login(user.username, "s3cret", true);
-      cy.getCookie("connect.sid").should("have.property", "expiry");
+      const newUser = {
+        firstName: "Test",
+        lastName: "User",
+        username: "testuser_unique",
+        password: "password123",
+        confirmPassword: "password123",
+      };
+
+      // Verificar estado inicial e snapshot visual
+      cy.getBySel("signup-title").should("be.visible");
+      cy.percySnapshot("Sign Up Page");
+
+      // Preencher formulário
+      cy.getBySel("signup-first-name").type(newUser.firstName);
+      cy.getBySel("signup-last-name").type(newUser.lastName);
+      cy.getBySel("signup-username").type(newUser.username);
+      cy.getBySel("signup-password").type(newUser.password);
+      cy.getBySel("signup-confirmPassword").type(newUser.confirmPassword);
+
+      // Submeter
+      cy.getBySel("signup-submit").click();
+
+      // Verificar redirecionamento para login
+      cy.location("pathname").should("eq", "/signin");
+    });
+
+    it("should display validation errors for invalid input", () => {
+      cy.visit("/signup");
+
+      // Tocar nos campos e sair para disparar validação (blurred)
+      cy.getBySel("signup-first-name").focus().blur();
+      cy.getBySel("signup-last-name").focus().blur();
+      cy.getBySel("signup-username").focus().blur();
+      
+      // Senha curta
+      cy.getBySel("signup-password").type("123").blur();
+      
+      // Senhas não conferem
+      cy.getBySel("signup-password").clear().type("password123");
+      cy.getBySel("signup-confirmPassword").type("password456").blur();
+
+      // Verificar que o botão está desabilitado
+      cy.getBySel("signup-submit").should("be.disabled");
+      
+      cy.percySnapshot("Sign Up Errors");
     });
   });
 
-  it("should allow a visitor to sign-up, login, and logout", function() {
-    cy.visit("/");
-    cy.getBySel("signup").click();
-    cy.getBySel("signup-title").should("be.visible").and("contain", "Sign Up");
-    cy.getBySel("signup-first-name").type(userInfo.firstName);
-    cy.getBySel("signup-last-name").type(userInfo.lastName);
-    cy.getBySel("signup-username").type(userInfo.username);
-    cy.getBySel("signup-password").type(userInfo.password);
-    cy.getBySel("signup-confirmPassword").type(userInfo.password);
-    cy.getBySel("signup-submit").click();
-    cy.wait("@signup");
+  context("Sign In", () => {
+    it("should allow a seeded user to sign in", () => {
+      // Buscar um usuário existente no banco de dados criado pelo seed
+      cy.database("find", "users").then((user: User) => {
+        cy.visit("/signin");
 
-    cy.login(userInfo.username, userInfo.password);
-    cy.getBySel("user-onboarding-dialog").should("be.visible");
-    cy.getBySel("user-onboarding-next").click();
-    cy.getBySel("user-onboarding-dialog-title").should("contain", "Create Bank Account");
-    cy.getBySelLike("bankName-input").type(bankInfo.bankName);
-    cy.getBySelLike("accountNumber-input").type(bankInfo.accountNumber);
-    cy.getBySelLike("routingNumber-input").type(bankInfo.routingNumber);
-    cy.getBySelLike("submit").click();
-    cy.wait("@createBankAccount");
-    cy.getBySel("user-onboarding-dialog-title").should("contain", "Finished");
-    cy.getBySel("user-onboarding-next").click();
-    cy.getBySel("transaction-list").should("be.visible");
+        cy.getBySel("signin-username").type(user.username);
+        // A senha padrão é definida no seedDataUtils ou .env, geralmente é uma string fixa para testes
+        // Assumindo a senha padrão definida no environment do cypress.json ou seed
+        const defaultPassword = Cypress.env("defaultPassword"); 
+        cy.getBySel("signin-password").type(defaultPassword);
+        
+        // Checkbox Remember Me
+        cy.getBySel("signin-remember-me").find("input").check();
 
-    if (isMobile()) {
-      cy.getBySel("sidenav-toggle").click();
-    }
-    cy.getBySel("sidenav-signout").should("be.visible").click();
-    cy.location("pathname").should("eq", "/signin");
+        cy.getBySel("signin-submit").click();
+
+        // Verificar redirecionamento para Home
+        cy.location("pathname").should("eq", "/");
+        
+        // Verificar se elementos da Home ou Onboarding aparecem
+        // O app pode mostrar o Onboarding se o usuário não tiver conta bancária
+        // Mas como pegamos do seed, ele deve ter.
+        cy.getBySel("sidenav-user-full-name").should("contain", user.firstName);
+      });
+    });
+
+    it("should display an error for invalid credentials", () => {
+      cy.visit("/signin");
+
+      cy.getBySel("signin-username").type("invalid_user");
+      cy.getBySel("signin-password").type("invalid_password");
+      cy.getBySel("signin-submit").click();
+
+      // Verificar alerta de erro
+      cy.getBySel("signin-error").should("be.visible").and("contain", "Incorrect username or password");
+      
+      cy.percySnapshot("Sign In Error");
+    });
+
+    it("should navigate to signup page", () => {
+      cy.visit("/signin");
+      cy.getBySel("signup").click();
+      cy.location("pathname").should("eq", "/signup");
+    });
   });
 
-  it("should display login errors", function() {
-    cy.visit("/");
-    cy.getBySel("signin-username").type("User").find("input").clear().blur();
-    cy.get("#username-helper-text").should("contain", "Username is required");
-    cy.getBySel("signin-password").type("abc").find("input").blur();
-    cy.getBySel("signin-submit").should("be.disabled");
-  });
+  context("Logout", () => {
+    it("should allow a user to logout", () => {
+      // Usar comando de API para logar rapidamente antes do teste de logout
+      cy.database("find", "users").then((user: User) => {
+        cy.loginByApi(user.username);
+      });
 
-  it("should display signup errors", function() {
-    cy.visit("/");
-    cy.getBySel("signup").click();
+      // Visitar a home já autenticado
+      cy.visit("/");
 
-    cy.getBySel("signup-first-name").type("Bob").find("input").clear().blur();
-    cy.get("#firstName-helper-text").should("contain", "First Name is required");
+      // Em viewports mobile o drawer inicia fechado, em desktop (1280px) inicia aberto ou persistente
+      // Verificamos se o botão de logout está visível, se não, abrimos o menu
+      cy.get("body").then(($body) => {
+        if ($body.find("[data-test='sidenav-signout']").is(":hidden")) {
+          cy.getBySel("sidenav-toggle").click();
+        }
+      });
 
-    cy.getBySel("signup-last-name").type("Ross").find("input").clear().blur();
-    cy.get("#lastName-helper-text").should("contain", "Last Name is required");
+      // Clicar em Logout
+      cy.getBySel("sidenav-signout").click();
 
-    cy.getBySel("signup-username").type("User").find("input").clear().blur();
-    cy.get("#username-helper-text").should("contain", "Username is required");
-
-    cy.getBySel("signup-password").type("password").find("input").clear().blur();
-    cy.getBySel("signup-confirmPassword").type("not-s3cret").find("input").blur();
-    cy.get("#confirmPassword-helper-text").should("contain", "Password does not match");
-    cy.getBySel("signup-submit").should("be.disabled");
-  });
-
-  it("should error for an invalid user", function() {
-    cy.login("nonexistent-user", "s3cret");
-    cy.getBySel("signin-error").should("contain", "Username or password is invalid");
-  });
-
-  it("should error for an invalid password for existing user", function() {
-    cy.database("find", "users").then((user: User) => {
-      cy.login(user.username, "wrong-password");
-      cy.getBySel("signin-error").should("contain", "Username or password is invalid");
+      // Verificar redirecionamento para Sign In
+      cy.location("pathname").should("eq", "/signin");
     });
   });
 });

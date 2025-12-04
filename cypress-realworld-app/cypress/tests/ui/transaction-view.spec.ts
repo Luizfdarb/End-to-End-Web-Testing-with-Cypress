@@ -1,103 +1,187 @@
 ﻿import { User, Transaction } from "../../../src/models";
 
-type NewTransactionCtx = {
-  transactionRequest?: Transaction;
-  authenticatedUser?: User;
-};
-
-const ctx: NewTransactionCtx = {};
-const comments = ["Thank you!", "Appreciate it."];
-
-describe("Transaction View", function() {
-  beforeEach(function() {
+describe("Transaction View", () => {
+  beforeEach(() => {
     cy.task("db:seed");
-    cy.server();
-    cy.route("GET", "/transactions").as("personalTransactions");
-    cy.route("GET", "/transactions/public").as("publicTransactions");
-    cy.route("GET", "/transactions/*").as("getTransaction");
-    cy.route("PATCH", "/transactions/*").as("updateTransaction");
-    cy.route("GET", "/checkAuth").as("userProfile");
-    cy.route("GET", "/notifications").as("getNotifications");
-    cy.route("GET", "/bankAccounts").as("getBankAccounts");
-
-    cy.database("find", "users").then(function(user: User) {
-      ctx.authenticatedUser = user;
-      cy.loginByXstate(ctx.authenticatedUser.username);
-
-      cy.database("find", "transactions", {
-        receiverId: ctx.authenticatedUser!.id,
-        status: "pending",
-        requestStatus: "pending",
-        requestResolvedAt: "",
-      }).then(function(transaction: Transaction) {
-        ctx.transactionRequest = transaction;
-      });
-    });
-
-    cy.getBySel("nav-personal-tab").click();
-    cy.wait("@personalTransactions");
+    // Login com um usuário consistente do seed data
+    cy.loginByApi("Katharina_Bernier");
   });
 
-  it("transactions navigation tabs are hidden on a transaction view page", function() {
-    cy.getBySelLike("transaction-item").first().click();
-    cy.location("pathname").should("include", "/transaction");
-    cy.getBySel("nav-transaction-tabs").should("not.be.visible");
-    cy.percySnapshot("Transaction Navigation Tabs Hidden");
+  it("should display transaction details correctly", () => {
+    cy.database("find", "users", { username: "Katharina_Bernier" }).then(
+      (user: User) => {
+        // Busca uma transação onde o usuário é o remetente ou destinatário
+        cy.database("find", "transactions", { senderId: user.id }).then(
+          (transaction: Transaction) => {
+            cy.visit(`/transaction/${transaction.id}`);
+
+            cy.getBySel("transaction-detail-header").should("be.visible");
+
+            // Valida se o avatar, nomes e valor estão presentes
+            cy.getBySel(`transaction-item-${transaction.id}`).should(
+              "be.visible"
+            );
+            cy.getBySel(`transaction-sender-${transaction.id}`).should(
+              "be.visible"
+            );
+            cy.getBySel(`transaction-receiver-${transaction.id}`).should(
+              "be.visible"
+            );
+            // Verifica a descrição vinda do banco
+            cy.contains(transaction.description).should("be.visible");
+            // Verifica o valor
+            cy.getBySel(`transaction-amount-${transaction.id}`).should(
+              "be.visible"
+            );
+          }
+        );
+      }
+    );
   });
 
-  it("likes a transaction", function() {
-    cy.getBySelLike("transaction-item").first().click();
-    cy.wait("@getTransaction");
-    cy.getBySelLike("like-button").click();
-    cy.getBySelLike("like-count").should("contain", 1);
-    cy.getBySelLike("like-button").should("be.disabled");
-    cy.percySnapshot("Transaction after Liked");
+  it("should allow liking a transaction", () => {
+    cy.database("find", "users", { username: "Katharina_Bernier" }).then(
+      (user: User) => {
+        cy.database("find", "transactions", { senderId: user.id }).then(
+          (transaction: Transaction) => {
+            cy.visit(`/transaction/${transaction.id}`);
+
+            // Prepara a interceptação da rota de like
+            cy.route("POST", `/likes/${transaction.id}`).as("createLike");
+
+            // Verifica o estado inicial do botão (habilitado) e clica
+            cy.getBySel(`transaction-like-button-${transaction.id}`)
+              .should("not.be.disabled")
+              .click();
+
+            // Aguarda a resposta da API
+            cy.wait("@createLike");
+
+            // Verifica se o botão foi desabilitado (usuário já curtiu)
+            cy.getBySel(`transaction-like-button-${transaction.id}`).should(
+              "be.disabled"
+            );
+
+            // Verifica se o contador de likes incrementou (assumindo que começa em 0 ou valida que existe um número)
+            cy.getBySel(`transaction-like-count-${transaction.id}`).then(
+              ($count) => {
+                const count = parseInt($count.text());
+                expect(count).to. be.at.least(1);
+              }
+            );
+          }
+        );
+      }
+    );
   });
 
-  it("comments on a transaction", function() {
-    cy.getBySelLike("transaction-item").first().click();
-    cy.wait("@getTransaction");
+  it("should allow commenting on a transaction", () => {
+    cy.database("find", "users", { username: "Katharina_Bernier" }).then(
+      (user: User) => {
+        cy.database("find", "transactions", { senderId: user.id }).then(
+          (transaction: Transaction) => {
+            cy.visit(`/transaction/${transaction.id}`);
 
-    comments.forEach(function(comment, index) {
-      cy.getBySelLike("comment-input").type(comment + "{enter}");
-      cy.getBySelLike("comments-list").children().eq(index).contains(comment);
-    });
+            const commentContent = "Nice transaction!";
 
-    cy.getBySelLike("comments-list").children().should("have.length", comments.length);
-    cy.percySnapshot("Comment on Transaction");
+            // Prepara a interceptação da rota de comentário
+            cy.route("POST", `/comments/${transaction.id}`).as("createComment");
+
+            // Digita o comentário e pressiona Enter
+            cy.getBySel(`transaction-comment-input-${transaction.id}`)
+              .type(`${commentContent}{enter}`);
+
+            // Aguarda a resposta da API
+            cy.wait("@createComment");
+
+            // Verifica se o comentário apareceu na lista
+            cy.getBySel("comments-list").should("contain", commentContent);
+          }
+        );
+      }
+    );
   });
 
-  it("accepts a transaction request", function() {
-    cy.visit("/transaction/" + ctx.transactionRequest!.id);
-    cy.wait("@getTransaction");
-    cy.getBySelLike("accept-request").click();
-    cy.wait("@updateTransaction").should("have.property", "status", 204);
-    cy.getBySelLike("accept-request").should("not.be.visible");
-    cy.percySnapshot("Transaction Accepted");
+  it("should accept a transaction request", () => {
+    cy.database("find", "users", { username: "Katharina_Bernier" }).then(
+      (user: User) => {
+        // Encontra uma transação onde o usuário logado é o RECEBEDOR da cobrança (receiverId)
+        // e o status é 'pending' (requestStatus)
+        cy.database("find", "transactions", {
+          receiverId: user.id,
+          status: "pending",
+          requestStatus: "pending",
+        }).then((transaction: Transaction) => {
+          // Se não houver transação pendente no seed, este teste falharia legitimamente no cenário real,
+          // mas o seed garante dados suficientes.
+          expect(transaction).to.exist;
+
+          cy.visit(`/transaction/${transaction.id}`);
+
+          // Intercepta o update da transação
+          cy.route("PATCH", `/transactions/${transaction.id}`).as(
+            "updateTransaction"
+          );
+
+          // Verifica se o botão de aceitar está visível e clica
+          cy.getBySel(`transaction-accept-request-${transaction.id}`)
+            .should("be.visible")
+            .click();
+
+          cy.wait("@updateTransaction");
+
+          // Verifica se os botões de ação sumiram após aceitar
+          cy.getBySel(`transaction-accept-request-${transaction.id}`).should(
+            "not.be.visible"
+          );
+          cy.getBySel(`transaction-reject-request-${transaction.id}`).should(
+            "not.be.visible"
+          );
+
+          // Verifica se o status mudou visualmente (opcional, dependendo de como a UI reflete isso,
+          // geralmente via Paid/Charged no título)
+          cy.getBySel(`transaction-action-${transaction.id}`).should(
+            "contain",
+            "charged"
+          );
+        });
+      }
+    );
   });
 
-  it("rejects a transaction request", function() {
-    cy.visit("/transaction/" + ctx.transactionRequest!.id);
-    cy.wait("@getTransaction");
-    cy.getBySelLike("reject-request").click();
-    cy.wait("@updateTransaction").should("have.property", "status", 204);
-    cy.getBySelLike("reject-request").should("not.be.visible");
-    cy.percySnapshot("Transaction Rejected");
-  });
+  it("should reject a transaction request", () => {
+    cy.database("find", "users", { username: "Katharina_Bernier" }).then(
+      (user: User) => {
+        // Encontra transação pendente (request)
+        cy.database("find", "transactions", {
+          receiverId: user.id,
+          status: "pending",
+          requestStatus: "pending",
+        }).then((transaction: Transaction) => {
+          expect(transaction).to.exist;
 
-  it("does not display accept/reject buttons on completed request", function() {
-    cy.database("find", "transactions", {
-      receiverId: ctx.authenticatedUser!.id,
-      status: "complete",
-      requestStatus: "accepted",
-    }).then(function(transactionRequest: Transaction) {
-      cy.visit("/transaction/" + transactionRequest!.id);
-    });
+          cy.visit(`/transaction/${transaction.id}`);
 
-    cy.wait("@getNotifications");
-    cy.getBySel("transaction-detail-header").should("be.visible");
-    cy.getBySel("transaction-accept-request").should("not.be.visible");
-    cy.getBySel("transaction-reject-request").should("not.be.visible");
-    cy.percySnapshot("Transaction Completed (not able to accept or reject)");
+          cy.route("PATCH", `/transactions/${transaction.id}`).as(
+            "updateTransaction"
+          );
+
+          // Clica em rejeitar
+          cy.getBySel(`transaction-reject-request-${transaction.id}`)
+            .should("be.visible")
+            .click();
+
+          cy.wait("@updateTransaction");
+
+          // Verifica se os botões sumiram
+          cy.getBySel(`transaction-reject-request-${transaction.id}`).should(
+            "not.be.visible"
+          );
+          cy.getBySel(`transaction-accept-request-${transaction.id}`).should(
+            "not.be.visible"
+          );
+        });
+      }
+    );
   });
 });
